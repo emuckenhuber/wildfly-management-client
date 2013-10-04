@@ -27,7 +27,7 @@ package org.jboss.as.protocol.mgmt;
  */
 public class ManagementPongHeader extends ManagementProtocolHeader {
 
-    protected ManagementPongHeader(int version) {
+    public ManagementPongHeader(int version) {
         super(version);
     }
 
