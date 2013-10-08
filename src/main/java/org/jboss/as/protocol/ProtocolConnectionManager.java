@@ -231,6 +231,11 @@ public class ProtocolConnectionManager {
         private final Connection connection;
         private final ConnectionOpenHandler openHandler;
 
+        EstablishedConnection(Connection connection, ConnectionOpenHandler openHandler) {
+            this.connection = connection;
+            this.openHandler = openHandler;
+        }
+
         @Override
         public ConnectionOpenHandler getConnectionOpenedHandler() {
             return openHandler;

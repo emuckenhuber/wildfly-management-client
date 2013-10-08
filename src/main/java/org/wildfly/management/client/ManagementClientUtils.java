@@ -13,7 +13,7 @@ import org.jboss.dmr.ModelNode;
 /**
  * @author Emanuel Muckenhuber
  */
-public class ManagementClientUtil {
+public class ManagementClientUtils {
 
     private static final String RELOAD = "reload";
     private static final String SHUTDOWN = "shutdown";

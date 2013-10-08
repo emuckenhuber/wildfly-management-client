@@ -9,6 +9,13 @@ import java.io.InputStream;
 public interface OperationAttachmentCallback {
 
     /**
+     * Get the number of attached streams.
+     *
+     * @return the number of attached streams
+     */
+    int getNumberOfAttachedStreams();
+
+    /**
      * Get the input stream size.
      *
      * @param i the input stream index
@@ -26,6 +33,12 @@ public interface OperationAttachmentCallback {
     InputStream getInputStream(int i) throws IOException;
 
     OperationAttachmentCallback NO_ATTACHMENTS = new OperationAttachmentCallback() {
+
+        @Override
+        public int getNumberOfAttachedStreams() {
+            return 0;
+        }
+
         @Override
         public InputStream getInputStream(final int i) throws IOException {
             throw new IOException("no attachments available");

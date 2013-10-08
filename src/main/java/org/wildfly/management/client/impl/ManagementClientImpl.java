@@ -8,18 +8,21 @@ import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.callback.NameCallback;
 import javax.security.auth.callback.UnsupportedCallbackException;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.SocketAddress;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.jboss.as.controller.client.ControllerClientLogger;
 import org.jboss.as.controller.client.ControllerClientMessages;
-import org.jboss.as.protocol.ProtocolMessages;
 import org.jboss.as.protocol.StreamUtils;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.CloseHandler;
@@ -27,16 +30,21 @@ import org.jboss.remoting3.Connection;
 import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
 import org.wildfly.management.client.ManagementClient;
+import org.wildfly.management.client.ManagementClientOptions;
 import org.wildfly.management.client.ManagementConnection;
+import org.xnio.Cancellable;
 import org.xnio.FutureResult;
 import org.xnio.IoFuture;
 import org.xnio.OptionMap;
+import org.xnio.Options;
+import org.xnio.Sequence;
 
 /**
  * @author Emanuel Muckenhuber
  */
 public class ManagementClientImpl extends AbstractHandleableCloseable<ManagementClientImpl> implements ManagementClient {
 
+    private static final String JBOSS_LOCAL_USER = "JBOSS-LOCAL-USER";
     private static final String CHANNEL_TYPE = "management";
     private static final int CLOSED_FLAG = 1 << 31;
 
@@ -62,53 +70,40 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
     }
 
     @Override
-    public Future<ManagementConnection> openConnection() throws IOException {
-        final IoFuture<ManagementConnection> result = null;
-
-        return null;
+    public Future<ManagementConnection> openConnection(String host, int port, OptionMap connectionOptions) throws IOException {
+        return openConnection(host, port, null, null, connectionOptions);
     }
 
-    ManagementConnection internalConnectSync(final String protocol, final SocketAddress bindAddress, final SocketAddress destination,
+    @Override
+    public Future<ManagementConnection> openConnection(String host, int port, CallbackHandler callbackHandler, OptionMap options) throws IOException {
+        return openConnection(host, port, callbackHandler, null, options);
+    }
+
+    @Override
+    public Future<ManagementConnection> openConnection(String host, int port, SSLContext sslContext, OptionMap options) throws IOException {
+        return openConnection(host, port, null, sslContext, options);
+    }
+
+    @Override
+    public Future<ManagementConnection> openConnection(String host, int port, CallbackHandler callbackHandler, SSLContext sslContext, OptionMap options) throws IOException {
+        final InetSocketAddress address = new InetSocketAddress(host, port);
+        return internalConnect(null, address, options, callbackHandler, sslContext);
+    }
+
+    Future<ManagementConnection> internalConnect(final SocketAddress bindAddress, final InetSocketAddress destination,
                                      final OptionMap connectOptions, final CallbackHandler callbackHandler,
-                                     final SSLContext sslContext, final int connectionTimeout) throws IOException {
+                                     final SSLContext sslContext) throws IOException {
 
         final CallbackHandler actualHandler = callbackHandler != null ? callbackHandler : new AnonymousCallbackHandler();
-        final WrapperCallbackHandler wrapperHandler = new WrapperCallbackHandler(actualHandler);
-        final IoFuture<ManagementConnection> future = internalOpenConnection(protocol, bindAddress, destination, connectOptions, wrapperHandler, sslContext);
-        long timeoutMillis = connectionTimeout;
-        IoFuture.Status status = future.await(timeoutMillis, TimeUnit.MILLISECONDS);
-        while (status == IoFuture.Status.WAITING) {
-            if (wrapperHandler.isInCall()) {
-                // If there is currently an interaction with the user just wait again.
-                status = future.await(timeoutMillis, TimeUnit.MILLISECONDS);
-            } else {
-                long lastInteraction = wrapperHandler.getCallFinished();
-                if (lastInteraction > 0) {
-                    long now = System.currentTimeMillis();
-                    long timeSinceLast = now - lastInteraction;
-                    if (timeSinceLast < timeoutMillis) {
-                        // As this point we are setting the timeout based on the time of the last interaction
-                        // with the user, if there is any time left we will wait for that time but dont wait for
-                        // a full timeout.
-                        status = future.await(timeoutMillis - timeSinceLast, TimeUnit.MILLISECONDS);
-                    } else {
-                        status = null;
-                    }
-                } else {
-                    status = null; // Just terminate status processing.
-                }
-            }
-        }
-
-        if (status == IoFuture.Status.DONE) {
-            return future.get();
-        }
-        if (status == IoFuture.Status.FAILED) {
-            throw ProtocolMessages.MESSAGES.failedToConnect(null, future.getException());
-        }
-        future.cancel();
-        throw ProtocolMessages.MESSAGES.couldNotConnect(null);
-
+        final ManagementConnectionFuture.WrapperCallbackHandler wrapperHandler = new ManagementConnectionFuture.WrapperCallbackHandler(actualHandler);
+        final String protocol = connectOptions.get(ManagementClientOptions.PROTOCOL, ManagementClientDefaults.DEFAULT_PROTOCOL);
+        final OptionMap.Builder builder = OptionMap.builder().addAll(options).addAll(connectOptions);
+        configureSaslMechnisms(null, isLocal(destination.getHostName()), builder);
+        final OptionMap options = builder.getMap();
+        final IoFuture<ManagementConnection> future = internalOpenConnection(protocol, bindAddress, destination, options, wrapperHandler, sslContext);
+        long timeoutMillis = connectOptions.get(ManagementClientOptions.CONNECTION_TIMEOUT, ManagementClientDefaults.DEFAULT_TIMEOUT);
+        final ManagementConnectionFuture result = new ManagementConnectionFuture(wrapperHandler, future, timeoutMillis);
+        return result;
     }
 
     IoFuture<ManagementConnection> internalOpenConnection(final String protocol, final SocketAddress bindAddress, final SocketAddress destination,
@@ -154,14 +149,22 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
                         }
 
                         @Override
-                        public void handleDone(Channel data, Void attachment) {
-                            final ManagementConnectionImpl connection = new ManagementConnectionImpl(data, getExecutor());
+                        public void handleDone(Channel channel, Void attachment) {
+                            final ManagementConnectionImpl connection = new ManagementConnectionImpl(channel, getExecutor());
                             connections.add(connection);
                             connection.addCloseHandler(connectionCloseHandler);
+                            result.setResult(connection);
                         }
                     }, null);
                 }
             }, null);
+            result.addCancelHandler(new Cancellable() {
+                @Override
+                public Cancellable cancel() {
+                    connectionFuture.cancel();
+                    return this;
+                }
+            });
             ok = true;
         } finally {
             if (!ok) {
@@ -212,39 +215,6 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
         }
     }
 
-    private static final class WrapperCallbackHandler implements CallbackHandler {
-
-        private volatile boolean inCall = false;
-
-        private volatile long callFinished = -1;
-
-        private final CallbackHandler wrapped;
-
-        WrapperCallbackHandler(final CallbackHandler toWrap) {
-            this.wrapped = toWrap;
-        }
-
-        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-            inCall = true;
-            try {
-                wrapped.handle(callbacks);
-            } finally {
-                // Set the time first so if a read is made between these two calls it will say inCall=true until
-                // callFinished is set.
-                callFinished = System.currentTimeMillis();
-                inCall = false;
-            }
-        }
-
-        boolean isInCall() {
-            return inCall;
-        }
-
-        long getCallFinished() {
-            return callFinished;
-        }
-    }
-
     private static final class AnonymousCallbackHandler implements CallbackHandler {
 
         public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
@@ -258,6 +228,66 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
             }
         }
 
+    }
+
+    private static void configureSaslMechnisms(Map<String, String> saslOptions, boolean isLocal, OptionMap.Builder builder) {
+        String[] mechanisms = null;
+        String listed;
+        if (saslOptions != null && (listed = saslOptions.get(Options.SASL_DISALLOWED_MECHANISMS.getName())) != null) {
+            // Disallowed mechanisms were passed via the saslOptions map; need to convert to an XNIO option
+            String[] split = listed.split(" ");
+            if (isLocal) {
+                mechanisms = new String[split.length + 1];
+                mechanisms[0] = JBOSS_LOCAL_USER;
+                System.arraycopy(split, 0, mechanisms, 1, split.length);
+            } else {
+                mechanisms = split;
+            }
+        } else if (!isLocal) {
+            mechanisms = new String[]{ JBOSS_LOCAL_USER };
+        }
+
+        if (mechanisms != null) {
+            builder.set(Options.SASL_DISALLOWED_MECHANISMS, Sequence.of(mechanisms));
+        }
+
+        if (saslOptions != null && (listed = saslOptions.get(Options.SASL_MECHANISMS.getName())) != null) {
+            // SASL mechanisms were passed via the saslOptions map; need to convert to an XNIO option
+            String[] split = listed.split(" ");
+            if (split.length > 0) {
+                builder.set(Options.SASL_MECHANISMS, Sequence.of(split));
+            }
+        }
+    }
+
+    private static boolean isLocal(final String hostName) {
+        try {
+            final InetAddress address = InetAddress.getByName(hostName);
+            NetworkInterface nic;
+            if (address.isLinkLocalAddress()) {
+                /*
+                 * AS7-6382 On Windows the getByInetAddress was not identifying a NIC where the address did not have the zone
+                 * ID, this manual iteration does allow for the address to be matched.
+                 */
+                Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+                nic = null;
+                while (interfaces.hasMoreElements() && nic == null) {
+                    NetworkInterface current = interfaces.nextElement();
+                    Enumeration<InetAddress> addresses = current.getInetAddresses();
+                    while (addresses.hasMoreElements() && nic == null) {
+                        InetAddress currentAddress = addresses.nextElement();
+                        if (address.equals(currentAddress)) {
+                            nic = current;
+                        }
+                    }
+                }
+            } else {
+                nic = NetworkInterface.getByInetAddress(address);
+            }
+            return address.isLoopbackAddress() || nic != null;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
 

@@ -1,6 +1,7 @@
 package org.wildfly.management.client.impl;
 
 import static org.jboss.as.protocol.mgmt.ProtocolUtils.expectHeader;
+import static org.wildfly.management.client.impl.ManagementClientChannelReceiver.safeWriteErrorResponse;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -19,7 +20,6 @@ import org.jboss.as.controller.client.impl.ModelControllerProtocol;
 import org.jboss.as.protocol.ProtocolLogger;
 import org.jboss.as.protocol.ProtocolMessages;
 import org.jboss.as.protocol.StreamUtils;
-import org.jboss.as.protocol.mgmt.ManagementPongHeader;
 import org.jboss.as.protocol.mgmt.ManagementProtocol;
 import org.jboss.as.protocol.mgmt.ManagementProtocolHeader;
 import org.jboss.as.protocol.mgmt.ManagementRequestHeader;
@@ -29,10 +29,11 @@ import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
 import org.wildfly.management.client.ManagementConnection;
+import org.wildfly.management.client.NotificationFilter;
+import org.wildfly.management.client.NotificationHandler;
 import org.wildfly.management.client.OperationAttachmentCallback;
 import org.xnio.FutureResult;
 import org.xnio.IoUtils;
-import org.xnio.Result;
 
 /**
  * @author Emanuel Muckenhuber
@@ -69,23 +70,30 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
     }
 
     @Override
-    public ModelNode execute(ModelNode operation) throws IOException {
+    public ModelNode execute(final ModelNode operation) throws IOException {
         return execute(operation, OperationAttachmentCallback.NO_ATTACHMENTS);
     }
 
     @Override
-    public ModelNode execute(ModelNode operation, OperationAttachmentCallback attachments) throws IOException {
+    public ModelNode execute(final ModelNode operation, final OperationAttachmentCallback attachments) throws IOException {
         return internalExecute(operation, attachments).futureResult.getIoFuture().get();
     }
 
     @Override
-    public Future<ModelNode> executeAsync(ModelNode operation) throws IOException {
+    public Future<ModelNode> executeAsync(final ModelNode operation) throws IOException {
         return executeAsync(operation, OperationAttachmentCallback.NO_ATTACHMENTS);
     }
 
     @Override
-    public Future<ModelNode> executeAsync(ModelNode operation, OperationAttachmentCallback attachments) throws IOException {
+    public Future<ModelNode> executeAsync(final ModelNode operation, final OperationAttachmentCallback attachments) throws IOException {
         return internalExecute(operation, attachments);
+    }
+
+    @Override
+    public NotificationRegistration registerNotificationHandler(final ModelNode address, final NotificationHandler handler, final NotificationFilter filter) {
+
+
+        return null;  //To change body of implemented methods use File | Settings | File Templates.
     }
 
     @Override
@@ -109,27 +117,44 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         if (res == 0) {
             closeComplete();
         } else {
-
+            for (final Request request : requests.values()) {
+                request.asyncCancel();
+            }
         }
     }
 
-    protected Request internalExecute(final ModelNode operation, final OperationAttachmentCallback attachments) throws IOException {
-        Request request;
+    protected void increaseRequestCount() throws IOException {
+        int old;
+        do {
+            old = stateUpdater.get(this);
+            if ((old & CLOSED_FLAG) != 0) {
+                throw new IOException("connection closed");
+            }
+        } while (! stateUpdater.compareAndSet(this, old, old + 1));
+    }
+
+    protected BaseRequest internalExecute(final ModelNode operation, final OperationAttachmentCallback attachments) throws IOException {
+        BaseRequest request;
         final FutureResult<ModelNode> result = new FutureResult<>();
-        for (; ; ) {
+        for (;;) {
             final int number = counter.incrementAndGet(this);
-            request = new Request(number, attachments, result);
+            request = new BaseRequest(number, attachments, result);
             if (requests.putIfAbsent(number, request) == null) {
                 break;
             }
         }
         boolean ok = false;
         try {
-            final ManagementRequestHeader header = new ManagementRequestHeader(ManagementProtocol.VERSION, request.id, request.id, ManagementProtocol.REQUEST_ID);
+            increaseRequestCount();
+            final ManagementRequestHeader header = new ManagementRequestHeader(ManagementProtocol.VERSION, request.id, request.id, ModelControllerProtocol.EXECUTE_ASYNC_CLIENT_REQUEST);
+            final int inputStreamLength = attachments != null ? attachments.getNumberOfAttachedStreams() : 0;
             final DataOutputStream os = new DataOutputStream(channel.writeMessage());
             try {
                 header.write(os);
+                os.write(ModelControllerProtocol.PARAM_OPERATION);
                 operation.writeExternal(os);
+                os.write(ModelControllerProtocol.PARAM_INPUTSTREAMS_LENGTH);
+                os.writeInt(inputStreamLength);
                 os.write(ManagementProtocol.REQUEST_END);
                 os.close();
                 ok = true;
@@ -146,13 +171,60 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
     }
 
-    class Request extends ManagementRequestImpl implements Result<ModelNode> {
+    protected void cancelRequest(final BaseRequest original, final int batchID) {
+        try {
+            CancelRequest request;
+            for (;;) {
+                final int number = counter.incrementAndGet(this);
+                request = new CancelRequest(number, original);
+                if (requests.putIfAbsent(number, request) == null) {
+                    break;
+                }
+            }
+            boolean ok = false;
+            try {
+                increaseRequestCount();
+                final ManagementRequestHeader header = new ManagementRequestHeader(ManagementProtocol.VERSION, request.requestID, batchID, ModelControllerProtocol.CANCEL_ASYNC_REQUEST);
+                final DataOutputStream os = new DataOutputStream(channel.writeMessage());
+                try {
+                    header.write(os);
+                    os.write(ManagementProtocol.REQUEST_END);
+                    os.close();
+                    ok = true;
+                } finally {
+                    IoUtils.safeClose(os);
+                }
+            } finally {
+                if (!ok) {
+                    requests.remove(request.requestID);
+                }
+            }
+        } catch (IOException e) {
+            // Maybe cancel the request all the time?
+            if ((stateUpdater.get(this) & CLOSED_FLAG) != 0) {
+                original.setCancelled();
+            }
+        }
+    }
+
+    interface Request {
+
+        OperationAttachmentCallback getAttachments();
+
+        void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException;
+        void handleFailure(IOException e);
+        void asyncCancel();
+
+    }
+
+    class BaseRequest extends ManagementRequestImpl implements Request {
 
         private final int id;
         private final OperationAttachmentCallback attachments;
         private final FutureResult<ModelNode> futureResult;
+        private boolean cancelled = false;
 
-        Request(final int id, final OperationAttachmentCallback attachments, final FutureResult<ModelNode> result) {
+        BaseRequest(final int id, final OperationAttachmentCallback attachments, final FutureResult<ModelNode> result) {
             super(result.getIoFuture());
             this.futureResult = result;
             this.attachments = attachments;
@@ -160,35 +232,86 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
+        public OperationAttachmentCallback getAttachments() {
+            return attachments;
+        }
+
+        @Override
+        public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
+            // Handle response
+            expectHeader(input, ModelControllerProtocol.PARAM_RESPONSE);
+            final ModelNode node = new ModelNode();
+            node.readExternal(input);
+            if (futureResult.setResult(node)) {
+                requestFinished();
+            }
+            expectHeader(input, ManagementProtocol.RESPONSE_END);
+        }
+
+        @Override
         public boolean cancel(boolean mayInterruptIfRunning) {
+            asyncCancel();
+            futureResult.getIoFuture().await();
             return super.cancel(mayInterruptIfRunning);
         }
 
         @Override
-        public boolean setResult(ModelNode result) {
-            if (futureResult.setResult(result)) {
-                requestFinished();
-                return true;
+        public void asyncCancel() {
+            synchronized (this) {
+                if (cancelled) {
+                    return;
+                }
+                cancelled = true;
+                cancelRequest(this, id);
             }
-            return false;
         }
 
         @Override
-        public boolean setException(IOException exception) {
+        public void handleFailure(IOException exception) {
             if (futureResult.setException(exception)) {
                 requestFinished();
-                return true;
             }
-            return false;
         }
 
-        @Override
-        public boolean setCancelled() {
+        protected boolean setCancelled() {
             if (futureResult.setCancelled()) {
                 requestFinished();
                 return true;
             }
             return false;
+        }
+    }
+
+    class CancelRequest implements Request {
+
+        private final BaseRequest toCancel;
+        private final int requestID;
+        CancelRequest(final int requestID, final BaseRequest toCancel) {
+            this.toCancel = toCancel;
+            this.requestID = requestID;
+        }
+
+        @Override
+        public OperationAttachmentCallback getAttachments() {
+            return OperationAttachmentCallback.NO_ATTACHMENTS;
+        }
+
+        @Override
+        public void handleFailure(IOException e) {
+            toCancel.handleFailure(e);
+            requestFinished();
+        }
+
+        @Override
+        public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
+            System.out.println("cancel complete");
+            toCancel.setCancelled();
+            requestFinished();
+        }
+
+        @Override
+        public void asyncCancel() {
+            // Nothing here.s
         }
     }
 
@@ -209,18 +332,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                 ProtocolLogger.CONNECTION_LOGGER.noSuchRequest(response.getResponseId(), channel);
                 safeWriteErrorResponse(channel, header, ProtocolMessages.MESSAGES.responseHandlerNotFound(response.getResponseId()));
             } else if (response.getError() != null) {
-                request.setException(new IOException(response.getError()));
-                requests.remove(response.getResponseId());
+                request.handleFailure(new IOException(response.getError()));
             } else {
                 try {
-                    // Handle response
-                    expectHeader(input, ModelControllerProtocol.PARAM_RESPONSE);
-                    final ModelNode node = new ModelNode();
-                    node.readExternal(input);
-                    request.setResult(node);
-                    expectHeader(input, ManagementProtocol.RESPONSE_END);
+                    request.handleResponse(response, input);
                 } catch (IOException e) {
-                    request.setException(e);
+                    request.handleFailure(e);
                 }
             }
         } else if (type == ManagementProtocol.TYPE_REQUEST) {
@@ -252,7 +369,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                     @Override
                     public void run() {
                         try {
-                            final OperationAttachmentCallback attachments = request.attachments;
+                            final OperationAttachmentCallback attachments = request.getAttachments();
                             final InputStream is = attachments.getInputStream(index);
                             try {
                                 final ManagementResponseHeader response = ManagementResponseHeader.create(header);
@@ -289,85 +406,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
                 // TODO do something with the message
                 // Send empty response
-                writeEmptyResponse(channel, header);
+                ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
 
                 break;
             default:
                 throw new IOException("no such operation id");
-        }
-    }
-
-
-    /**
-     * Handle a simple ping request.
-     *
-     * @param channel the channel
-     * @param header  the protocol header
-     * @throws IOException for any error
-     */
-    protected static void handlePing(final Channel channel, final ManagementProtocolHeader header) throws IOException {
-        final ManagementProtocolHeader response = new ManagementPongHeader(header.getVersion());
-        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
-        try {
-            response.write(output);
-            output.close();
-        } finally {
-            StreamUtils.safeClose(output);
-        }
-    }
-
-    /**
-     * Safe write error response.
-     *
-     * @param channel the channel
-     * @param header  the request header
-     * @param error   the exception
-     */
-    protected static void safeWriteErrorResponse(final Channel channel, final ManagementProtocolHeader header, final Exception error) {
-        if (header.getType() == ManagementProtocol.TYPE_REQUEST) {
-            try {
-                writeErrorResponse(channel, (ManagementRequestHeader) header, error);
-            } catch (IOException ioe) {
-                ProtocolLogger.ROOT_LOGGER.tracef(ioe, "failed to write error response for %s on channel: %s", header, channel);
-            }
-        }
-    }
-
-    /**
-     * Write an error response.
-     *
-     * @param channel the channel
-     * @param header  the request
-     * @param error   the error
-     * @throws IOException
-     */
-    protected static void writeErrorResponse(final Channel channel, final ManagementRequestHeader header, final Exception error) throws IOException {
-        final ManagementResponseHeader response = ManagementResponseHeader.create(header, error);
-        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
-        try {
-            response.write(output);
-            output.close();
-        } finally {
-            StreamUtils.safeClose(output);
-        }
-    }
-
-    /**
-     * Write an empty response.
-     *
-     * @param channel the channel
-     * @param header  the request
-     * @throws IOException
-     */
-    protected static void writeEmptyResponse(final Channel channel, final ManagementRequestHeader header) throws IOException {
-        final ManagementResponseHeader response = ManagementResponseHeader.create(header);
-        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
-        try {
-            response.write(output);
-            output.write(ManagementProtocol.REQUEST_END);
-            output.close();
-        } finally {
-            StreamUtils.safeClose(output);
         }
     }
 

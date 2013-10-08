@@ -4,11 +4,15 @@ import static org.jboss.as.protocol.ProtocolLogger.ROOT_LOGGER;
 
 import java.io.DataInput;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 
 import org.jboss.as.protocol.StreamUtils;
+import org.jboss.as.protocol.mgmt.ManagementPongHeader;
 import org.jboss.as.protocol.mgmt.ManagementProtocol;
 import org.jboss.as.protocol.mgmt.ManagementProtocolHeader;
+import org.jboss.as.protocol.mgmt.ManagementRequestHeader;
+import org.jboss.as.protocol.mgmt.ManagementResponseHeader;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.MessageInputStream;
 
@@ -43,7 +47,7 @@ public abstract class ManagementClientChannelReceiver implements Channel.Receive
             if (type == ManagementProtocol.TYPE_PING) {
                 // Handle legacy ping/pong directly
                 ROOT_LOGGER.tracef("Received ping on %s", this);
-                ManagementConnectionImpl.handlePing(channel, header);
+                handlePing(channel, header);
             } else if (type == ManagementProtocol.TYPE_PONG) {
                 // Nothing to do here
                 ROOT_LOGGER.tracef("Received on on %s", this);
@@ -78,6 +82,80 @@ public abstract class ManagementClientChannelReceiver implements Channel.Receive
     @Override
     public void handleEnd(Channel channel) {
         StreamUtils.safeClose(channel);
+    }
+
+
+    /**
+     * Handle a simple ping request.
+     *
+     * @param channel the channel
+     * @param header  the protocol header
+     * @throws java.io.IOException for any error
+     */
+    protected static void handlePing(final Channel channel, final ManagementProtocolHeader header) throws IOException {
+        final ManagementProtocolHeader response = new ManagementPongHeader(header.getVersion());
+        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
+        try {
+            response.write(output);
+            output.close();
+        } finally {
+            StreamUtils.safeClose(output);
+        }
+    }
+
+    /**
+     * Safe write error response.
+     *
+     * @param channel the channel
+     * @param header  the request header
+     * @param error   the exception
+     */
+    protected static void safeWriteErrorResponse(final Channel channel, final ManagementProtocolHeader header, final Exception error) {
+        if (header.getType() == ManagementProtocol.TYPE_REQUEST) {
+            try {
+                writeErrorResponse(channel, (ManagementRequestHeader) header, error);
+            } catch (IOException ioe) {
+                ROOT_LOGGER.tracef(ioe, "failed to write error response for %s on channel: %s", header, channel);
+            }
+        }
+    }
+
+    /**
+     * Write an error response.
+     *
+     * @param channel the channel
+     * @param header  the request
+     * @param error   the error
+     * @throws java.io.IOException
+     */
+    protected static void writeErrorResponse(final Channel channel, final ManagementRequestHeader header, final Exception error) throws IOException {
+        final ManagementResponseHeader response = ManagementResponseHeader.create(header, error);
+        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
+        try {
+            response.write(output);
+            output.close();
+        } finally {
+            StreamUtils.safeClose(output);
+        }
+    }
+
+    /**
+     * Write an empty response.
+     *
+     * @param channel the channel
+     * @param header  the request
+     * @throws java.io.IOException
+     */
+    protected static void writeEmptyResponse(final Channel channel, final ManagementRequestHeader header) throws IOException {
+        final ManagementResponseHeader response = ManagementResponseHeader.create(header);
+        final DataOutputStream output = new DataOutputStream(channel.writeMessage());
+        try {
+            response.write(output);
+            output.write(ManagementProtocol.REQUEST_END);
+            output.close();
+        } finally {
+            StreamUtils.safeClose(output);
+        }
     }
 
 }

@@ -39,6 +39,15 @@ final class SecurityActions {
     private SecurityActions() {
     }
 
+    static int getSystemProperty(final String name, final int defaultValue) {
+        final String value = getSystemProperty(name);
+        try {
+            return value == null ? defaultValue : Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
+        }
+    }
+
     static String getSystemProperty(final String key) {
         return getSecurityManager() == null ? getProperty(key) : doPrivileged(new PrivilegedAction<String>() {
             @Override
