@@ -1,24 +1,41 @@
+/*
+ * JBoss, Home of Professional Open Source.
+ * Copyright 2013, Red Hat, Inc., and individual contributors
+ * as indicated by the @author tags. See the copyright.txt file in the
+ * distribution for a full listing of individual contributors.
+ *
+ * This is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 2.1 of
+ * the License, or (at your option) any later version.
+ *
+ * This software is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this software; if not, write to the Free
+ * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
+ */
+
 package org.wildfly.management.client.impl;
 
-import static org.jboss.as.protocol.ProtocolLogger.ROOT_LOGGER;
+import static org.wildfly.management.client.ManagementClientLogger.ROOT_LOGGER;
 
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 
-import org.jboss.as.protocol.StreamUtils;
-import org.jboss.as.protocol.mgmt.ManagementPongHeader;
-import org.jboss.as.protocol.mgmt.ManagementProtocol;
-import org.jboss.as.protocol.mgmt.ManagementProtocolHeader;
-import org.jboss.as.protocol.mgmt.ManagementRequestHeader;
-import org.jboss.as.protocol.mgmt.ManagementResponseHeader;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.MessageInputStream;
+import org.wildfly.management.client.ManagementClientLogger;
 
 /**
-* @author Emanuel Muckenhuber
-*/
+ * @author Emanuel Muckenhuber
+ */
 public abstract class ManagementClientChannelReceiver implements Channel.Receiver {
 
     /**
@@ -40,7 +57,7 @@ public abstract class ManagementClientChannelReceiver implements Channel.Receive
     @Override
     public void handleMessage(Channel channel, MessageInputStream message) {
         try {
-            ROOT_LOGGER.tracef("%s handling incoming data", this);
+            ManagementClientLogger.ROOT_LOGGER.tracef("%s handling incoming data", this);
             final DataInput input = new DataInputStream(message);
             final ManagementProtocolHeader header = ManagementProtocolHeader.parse(input);
             final byte type = header.getType();
@@ -93,7 +110,7 @@ public abstract class ManagementClientChannelReceiver implements Channel.Receive
      * @throws java.io.IOException for any error
      */
     protected static void handlePing(final Channel channel, final ManagementProtocolHeader header) throws IOException {
-        final ManagementProtocolHeader response = new ManagementPongHeader(header.getVersion());
+        final ManagementProtocolHeader response = new ManagementProtocolHeader.ManagementPongHeader(header.getVersion());
         final DataOutputStream output = new DataOutputStream(channel.writeMessage());
         try {
             response.write(output);

@@ -7,18 +7,17 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 
-import org.jboss.as.controller.client.impl.ModelControllerProtocol;
-import org.jboss.as.protocol.StreamUtils;
-import org.jboss.as.protocol.mgmt.ManagementProtocol;
-import org.jboss.as.protocol.mgmt.ManagementProtocolHeader;
-import org.jboss.as.protocol.mgmt.ManagementRequestHeader;
-import org.jboss.as.protocol.mgmt.ManagementResponseHeader;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.MessageOutputStream;
 import org.jboss.remoting3.OpenListener;
 import org.jboss.remoting3.Registration;
+import org.wildfly.management.client.impl.StreamUtils;
 import org.wildfly.management.client.impl.ManagementClientChannelReceiver;
+import org.wildfly.management.client.impl.ManagementProtocol;
+import org.wildfly.management.client.impl.ManagementProtocolHeader;
+import org.wildfly.management.client.impl.ManagementRequestHeader;
+import org.wildfly.management.client.impl.ManagementResponseHeader;
 import org.xnio.OptionMap;
 
 /**
@@ -31,6 +30,7 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     private volatile TestMessageHandler handler;
 
     private final ExecutorService executorService;
+
     public TestServer(ExecutorService executorService) {
         this.executorService = executorService;
     }

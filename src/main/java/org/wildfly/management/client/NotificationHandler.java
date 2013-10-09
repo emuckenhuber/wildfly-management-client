@@ -29,5 +29,12 @@ package org.wildfly.management.client;
  * @author <a href="http://jmesnil.net/">Jeff Mesnil</a> (c) 2013 Red Hat inc.
  */
 public interface NotificationHandler {
+
+    /**
+     * Handle a notification.
+     *
+     * @param notification the notification
+     */
     void handleNotification(Notification notification);
+
 }

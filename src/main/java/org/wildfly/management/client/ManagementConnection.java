@@ -1,3 +1,25 @@
+/*
+ * JBoss, Home of Professional Open Source.
+ * Copyright 2013, Red Hat, Inc., and individual contributors
+ * as indicated by the @author tags. See the copyright.txt file in the
+ * distribution for a full listing of individual contributors.
+ *
+ * This is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 2.1 of
+ * the License, or (at your option) any later version.
+ *
+ * This software is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this software; if not, write to the Free
+ * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
+ */
+
 package org.wildfly.management.client;
 
 import java.io.Closeable;
@@ -7,6 +29,8 @@ import java.util.concurrent.Future;
 import org.jboss.dmr.ModelNode;
 
 /**
+ * The management connection.
+ *
  * @author Emanuel Muckenhuber
  */
 public interface ManagementConnection extends Closeable {
@@ -28,7 +52,7 @@ public interface ManagementConnection extends Closeable {
      * @return the result of the operation
      * @throws java.io.IOException if an I/O error occurs while executing the operation
      */
-    ModelNode execute(ModelNode operation, OperationAttachmentCallback attachments) throws IOException;
+    ModelNode execute(ModelNode operation, OperationAttachments attachments) throws IOException;
 
     /**
      * Execute an operation asynchronously.
@@ -45,7 +69,7 @@ public interface ManagementConnection extends Closeable {
      * @param attachments the operation attachments
      * @return the future result of the operation
      */
-    Future<ModelNode> executeAsync(ModelNode operation, OperationAttachmentCallback attachments) throws IOException;
+    Future<ModelNode> executeAsync(ModelNode operation, OperationAttachments attachments) throws IOException;
 
     /**
      * Register the given NotificationHandler to receive notifications emitted by the resource at the given source address.
@@ -56,7 +80,7 @@ public interface ManagementConnection extends Closeable {
      *
      * @param address the address of the resource(s) that emit notifications.
      * @param handler the notification handler
-     * @param filter the notification filter. Use {@link NotificationFilter#ALL} to let the handler always handle notifications
+     * @param filter  the notification filter. Use {@link NotificationFilter#ALL} to let the handler always handle notifications
      */
     NotificationRegistration registerNotificationHandler(ModelNode address, NotificationHandler handler, NotificationFilter filter);
 
@@ -76,6 +100,10 @@ public interface ManagementConnection extends Closeable {
      * Unregister a previously registered NotificationHandler.
      */
     interface NotificationRegistration {
+
+        /**
+         * Unregister the notification.
+         */
         void unregister();
     }
 

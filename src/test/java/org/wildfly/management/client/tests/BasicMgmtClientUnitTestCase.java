@@ -1,20 +1,20 @@
 package org.wildfly.management.client.tests;
 
-import static org.jboss.as.controller.client.helpers.ClientConstants.OUTCOME;
-import static org.jboss.as.controller.client.helpers.ClientConstants.RESULT;
-import static org.jboss.as.controller.client.helpers.ClientConstants.SUCCESS;
-import static org.jboss.as.protocol.StreamUtils.safeClose;
+import static org.wildfly.management.client.impl.StreamUtils.safeClose;
+import static org.wildfly.management.client.helpers.ClientConstants.OUTCOME;
+import static org.wildfly.management.client.helpers.ClientConstants.RESULT;
+import static org.wildfly.management.client.helpers.ClientConstants.SUCCESS;
 
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 
-import org.jboss.as.controller.client.impl.ModelControllerProtocol;
 import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
 import org.junit.Test;
 import org.wildfly.management.client.ManagementConnection;
+import org.wildfly.management.client.impl.ManagementProtocol;
 
 /**
  * @author Emanuel Muckenhuber
@@ -50,7 +50,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
             @Override
             public void writeMessage(DataOutput os) throws IOException {
-                os.write(ModelControllerProtocol.PARAM_RESPONSE);
+                os.write(ManagementProtocol.PARAM_RESPONSE);
                 SUCCESS_FULL_RESPONSE.writeExternal(os);
             }
         });
@@ -120,6 +120,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
             @Override
             public void writeMessage(DataOutput os) throws IOException {
+                os.write(ManagementProtocol.PARAM_RESPONSE);
                 SUCCESS_FULL_RESPONSE.writeExternal(os);
             }
         });

@@ -22,19 +22,22 @@
 
 package org.wildfly.management.client;
 
-import org.xnio.Option;
-
 /**
- * @author Emanuel Muckenhuber
+ * The severity of the message to send to the client.
+ *
+ * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
-public final class ManagementClientOptions {
-
-    private ManagementClientOptions() {
-        //
-    }
-
-    public static final Option<String> PROTOCOL = Option.simple(ManagementClientOptions.class, "PROTOCOL", String.class);
-    public static final Option<Integer> CONNECTION_TIMEOUT = Option.simple(ManagementClientOptions.class, "CONNECTION_TIMEOUT", Integer.class);
-    public static final Option<String> CLIENT_BIND_ADDRESS = Option.simple(ManagementClientOptions.class, "CLIENT_BIND_ADDRESS", String.class);
-
+public enum MessageSeverity {
+    /**
+     * Informational severity.
+     */
+    INFO,
+    /**
+     * Warning severity.
+     */
+    WARN,
+    /**
+     * Error severity.
+     */
+    ERROR,
 }

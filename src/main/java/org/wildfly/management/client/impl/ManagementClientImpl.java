@@ -1,3 +1,25 @@
+/*
+ * JBoss, Home of Professional Open Source.
+ * Copyright 2013, Red Hat, Inc., and individual contributors
+ * as indicated by the @author tags. See the copyright.txt file in the
+ * distribution for a full listing of individual contributors.
+ *
+ * This is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation; either version 2.1 of
+ * the License, or (at your option) any later version.
+ *
+ * This software is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this software; if not, write to the Free
+ * Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA, or see the FSF site: http://www.fsf.org.
+ */
+
 package org.wildfly.management.client.impl;
 
 import static org.xnio.IoFuture.HandlingNotifier;
@@ -21,15 +43,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.jboss.as.controller.client.ControllerClientLogger;
-import org.jboss.as.controller.client.ControllerClientMessages;
-import org.jboss.as.protocol.StreamUtils;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.Connection;
 import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
 import org.wildfly.management.client.ManagementClient;
+import org.wildfly.management.client.ManagementClientLogger;
+import org.wildfly.management.client.ManagementClientMessages;
 import org.wildfly.management.client.ManagementClientOptions;
 import org.wildfly.management.client.ManagementConnection;
 import org.xnio.Cancellable;
@@ -42,13 +63,13 @@ import org.xnio.Sequence;
 /**
  * @author Emanuel Muckenhuber
  */
-public class ManagementClientImpl extends AbstractHandleableCloseable<ManagementClientImpl> implements ManagementClient {
+class ManagementClientImpl extends AbstractHandleableCloseable<ManagementClientImpl> implements ManagementClient {
 
     private static final String JBOSS_LOCAL_USER = "JBOSS-LOCAL-USER";
-    private static final String CHANNEL_TYPE = "management";
-    private static final int CLOSED_FLAG = 1 << 31;
+    private static final String CHANNEL_TYPE = ManagementClientDefaults.CHANNEL_TYPE;
 
     private volatile int state = 0;
+    private static final int CLOSED_FLAG = 1 << 31;
     private static final AtomicIntegerFieldUpdater<ManagementClientImpl> stateUpdater = AtomicIntegerFieldUpdater.newUpdater(ManagementClientImpl.class, "state");
     private final Set<ManagementConnectionImpl> connections = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<ManagementConnectionImpl, Boolean>()));
 
@@ -70,6 +91,11 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
     }
 
     @Override
+    public Future<ManagementConnection> openConnection(String host, int port) throws IOException {
+        return openConnection(host, port, null, null, OptionMap.EMPTY);
+    }
+
+    @Override
     public Future<ManagementConnection> openConnection(String host, int port, OptionMap connectionOptions) throws IOException {
         return openConnection(host, port, null, null, connectionOptions);
     }
@@ -87,23 +113,24 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
     @Override
     public Future<ManagementConnection> openConnection(String host, int port, CallbackHandler callbackHandler, SSLContext sslContext, OptionMap options) throws IOException {
         final InetSocketAddress address = new InetSocketAddress(host, port);
-        return internalConnect(null, address, options, callbackHandler, sslContext);
+        return internalConnect(address, options, callbackHandler, sslContext);
     }
 
-    Future<ManagementConnection> internalConnect(final SocketAddress bindAddress, final InetSocketAddress destination,
-                                     final OptionMap connectOptions, final CallbackHandler callbackHandler,
-                                     final SSLContext sslContext) throws IOException {
+    Future<ManagementConnection> internalConnect(final InetSocketAddress destination,
+                                                 final OptionMap connectOptions, final CallbackHandler callbackHandler,
+                                                 final SSLContext sslContext) throws IOException {
 
         final CallbackHandler actualHandler = callbackHandler != null ? callbackHandler : new AnonymousCallbackHandler();
         final ManagementConnectionFuture.WrapperCallbackHandler wrapperHandler = new ManagementConnectionFuture.WrapperCallbackHandler(actualHandler);
-        final String protocol = connectOptions.get(ManagementClientOptions.PROTOCOL, ManagementClientDefaults.DEFAULT_PROTOCOL);
         final OptionMap.Builder builder = OptionMap.builder().addAll(options).addAll(connectOptions);
         configureSaslMechnisms(null, isLocal(destination.getHostName()), builder);
         final OptionMap options = builder.getMap();
+        final String protocol = options.get(ManagementClientOptions.PROTOCOL, ManagementClientDefaults.DEFAULT_PROTOCOL);
+        final String bindAddressString = options.get(ManagementClientOptions.CLIENT_BIND_ADDRESS, null);
+        final InetSocketAddress bindAddress = bindAddressString != null ? new InetSocketAddress(bindAddressString, 0) : null;
         final IoFuture<ManagementConnection> future = internalOpenConnection(protocol, bindAddress, destination, options, wrapperHandler, sslContext);
         long timeoutMillis = connectOptions.get(ManagementClientOptions.CONNECTION_TIMEOUT, ManagementClientDefaults.DEFAULT_TIMEOUT);
-        final ManagementConnectionFuture result = new ManagementConnectionFuture(wrapperHandler, future, timeoutMillis);
-        return result;
+        return new ManagementConnectionFuture(wrapperHandler, future, timeoutMillis);
     }
 
     IoFuture<ManagementConnection> internalOpenConnection(final String protocol, final SocketAddress bindAddress, final SocketAddress destination,
@@ -135,6 +162,7 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
                 @Override
                 public void handleDone(Connection connection, Void attachment) {
                     final IoFuture<Channel> channelFuture = connection.openChannel(CHANNEL_TYPE, connectOptions);
+                    final Connection underlyingConnection = connection;
                     channelFuture.addNotifier(new HandlingNotifier<Channel, Void>() {
                         @Override
                         public void handleCancelled(Void attachment) {
@@ -151,7 +179,16 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
                         @Override
                         public void handleDone(Channel channel, Void attachment) {
                             final ManagementConnectionImpl connection = new ManagementConnectionImpl(channel, getExecutor());
+                            // Track the connection as part of this client
                             connections.add(connection);
+                            // Close the underlying connection
+                            connection.addCloseHandler(new CloseHandler<ManagementConnectionImpl>() {
+                                @Override
+                                public void handleClose(ManagementConnectionImpl closed, IOException exception) {
+                                    underlyingConnection.closeAsync();
+                                }
+                            });
+                            // remove the connection from the client
                             connection.addCloseHandler(connectionCloseHandler);
                             result.setResult(connection);
                         }
@@ -204,30 +241,15 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
         try {
             if (isOpen()) {
                 // Create the leak description
-                final Throwable t = ControllerClientMessages.MESSAGES.controllerClientNotClosed();
+                final Throwable t = ManagementClientMessages.MESSAGES.controllerClientNotClosed();
                 t.setStackTrace(allocationStackTrace);
-                ControllerClientLogger.ROOT_LOGGER.leakedControllerClient(t);
+                ManagementClientLogger.ROOT_LOGGER.leakedControllerClient(t);
                 // Close
                 StreamUtils.safeClose(this);
             }
         } finally {
             super.finalize();
         }
-    }
-
-    private static final class AnonymousCallbackHandler implements CallbackHandler {
-
-        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
-            for (Callback current : callbacks) {
-                if (current instanceof NameCallback) {
-                    NameCallback ncb = (NameCallback) current;
-                    ncb.setName("anonymous");
-                } else {
-                    throw new UnsupportedCallbackException(current);
-                }
-            }
-        }
-
     }
 
     private static void configureSaslMechnisms(Map<String, String> saslOptions, boolean isLocal, OptionMap.Builder builder) {
@@ -244,7 +266,7 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
                 mechanisms = split;
             }
         } else if (!isLocal) {
-            mechanisms = new String[]{ JBOSS_LOCAL_USER };
+            mechanisms = new String[]{JBOSS_LOCAL_USER};
         }
 
         if (mechanisms != null) {
@@ -290,5 +312,19 @@ public class ManagementClientImpl extends AbstractHandleableCloseable<Management
         }
     }
 
+    private static final class AnonymousCallbackHandler implements CallbackHandler {
+
+        public void handle(Callback[] callbacks) throws IOException, UnsupportedCallbackException {
+            for (Callback current : callbacks) {
+                if (current instanceof NameCallback) {
+                    NameCallback ncb = (NameCallback) current;
+                    ncb.setName("anonymous");
+                } else {
+                    throw new UnsupportedCallbackException(current);
+                }
+            }
+        }
+
+    }
 
 }

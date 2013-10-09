@@ -2,20 +2,23 @@ package org.wildfly.management.client.tests;
 
 import java.io.IOException;
 
-import org.jboss.as.controller.client.helpers.ClientConstants;
-import org.jboss.as.protocol.StreamUtils;
 import org.jboss.dmr.ModelNode;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.wildfly.management.client.ManagementClient;
 import org.wildfly.management.client.ManagementClientFactory;
 import org.wildfly.management.client.ManagementConnection;
+import org.wildfly.management.client.impl.StreamUtils;
+import org.wildfly.management.client.helpers.ClientConstants;
+import org.wildfly.management.client.helpers.Operations;
 import org.xnio.OptionMap;
 
 /**
  * @author Emanuel Muckenhuber
  */
+@Ignore("needs as running")
 public class StandaloneTestCase {
 
     private static ManagementClient client;
@@ -47,6 +50,27 @@ public class StandaloneTestCase {
 
             final ModelNode result = connection.execute(operation);
             System.out.println(result);
+
+        } finally {
+            StreamUtils.safeClose(connection);
+        }
+    }
+
+    @Test
+    public void otherTest() throws Exception {
+
+        final ManagementConnection connection = openConnection();
+        try {
+
+            final ModelNode address = new ModelNode().setEmptyList();
+            // Read the server state
+            final ModelNode operation = Operations.createReadAttributeOperation(address, "server-state");
+            final ModelNode result = connection.execute(operation);
+            if (Operations.isSuccessfulOutcome(result)) {
+                System.out.printf("Server state: %s%n", Operations.readResult(result));
+            } else {
+                System.out.printf("Failure! %s%n", Operations.getFailureDescription(result));
+            }
 
         } finally {
             StreamUtils.safeClose(connection);
