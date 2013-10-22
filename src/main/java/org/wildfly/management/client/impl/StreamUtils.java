@@ -36,7 +36,7 @@ import java.io.OutputStream;
 /**
  * @author <a href="mailto:david.lloyd@redhat.com">David M. Lloyd</a>
  */
-public final class StreamUtils {
+class StreamUtils {
 
     private static final int BUFFER_SIZE = 8192;
 

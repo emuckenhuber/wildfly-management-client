@@ -90,14 +90,6 @@ public interface ManagementClientMessages {
     IllegalArgumentException cannotUseDeploymentPlan();
 
     /**
-     * Creates an exception indicating the channel is closed.
-     *
-     * @return an {@link IOException} for the error.
-     */
-    @Message(id = 10625, value = "Channel closed")
-    IOException channelClosed(@Cause IOException cause);
-
-    /**
      * A message indicating the a deployment with the {@code name} is already present in the domain.
      *
      * @param name the name of the deployment.

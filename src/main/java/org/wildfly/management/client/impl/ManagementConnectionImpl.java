@@ -115,7 +115,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         return internalExecute(operation, attachments);
     }
 
-    protected ExecuteRequest internalExecute(final ModelNode operation, final OperationAttachments attachments) throws IOException {
+    private ExecuteRequest internalExecute(final ModelNode operation, final OperationAttachments attachments) throws IOException {
         ExecuteRequest request;
         final FutureResult<ModelNode> result = new FutureResult<>();
         for (;;) {
@@ -205,9 +205,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
     @Override
     protected void closeComplete() {
-        channel.closeAsync(); // make sure the channel is closed
-        notificationHandlers.clear(); // clear the notification handlers
-        super.closeComplete();
+        try {
+            channel.closeAsync(); // make sure the channel is closed
+            notificationHandlers.clear(); // clear the notification handlers
+        } finally {
+            super.closeComplete();
+        }
     }
 
     protected void increaseRequestCount() throws IOException {
@@ -536,7 +539,6 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
         @Override
         public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
-            System.out.println("cancel complete");
             // toCancel.setCancelled() // wait for original response
             requestFinished();
         }

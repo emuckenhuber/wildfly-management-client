@@ -1,4 +1,4 @@
-package org.wildfly.management.client.tests;
+package org.wildfly.management.client.impl;
 
 import static org.wildfly.management.client.impl.StreamUtils.safeClose;
 import static org.wildfly.management.client.helpers.ClientConstants.OUTCOME;
@@ -14,7 +14,6 @@ import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
 import org.junit.Test;
 import org.wildfly.management.client.ManagementConnection;
-import org.wildfly.management.client.impl.ManagementProtocol;
 
 /**
  * @author Emanuel Muckenhuber

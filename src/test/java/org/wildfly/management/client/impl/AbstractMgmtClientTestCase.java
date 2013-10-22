@@ -1,4 +1,4 @@
-package org.wildfly.management.client.tests;
+package org.wildfly.management.client.impl;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -18,8 +18,6 @@ import org.junit.BeforeClass;
 import org.wildfly.management.client.ManagementClient;
 import org.wildfly.management.client.ManagementClientOptions;
 import org.wildfly.management.client.ManagementConnection;
-import org.wildfly.management.client.impl.StreamUtils;
-import org.wildfly.management.client.impl.ManagementClientFactoryImpl;
 import org.xnio.OptionMap;
 import org.xnio.Options;
 import org.xnio.Sequence;

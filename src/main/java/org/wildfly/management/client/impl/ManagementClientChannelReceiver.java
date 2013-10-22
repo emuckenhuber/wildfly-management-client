@@ -36,7 +36,7 @@ import org.wildfly.management.client.ManagementClientLogger;
 /**
  * @author Emanuel Muckenhuber
  */
-public abstract class ManagementClientChannelReceiver implements Channel.Receiver {
+abstract class ManagementClientChannelReceiver implements Channel.Receiver {
 
     /**
      * Process a received message.

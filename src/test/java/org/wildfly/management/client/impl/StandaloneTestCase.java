@@ -1,4 +1,4 @@
-package org.wildfly.management.client.tests;
+package org.wildfly.management.client.impl;
 
 import java.io.IOException;
 
