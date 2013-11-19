@@ -8,6 +8,7 @@ import static org.wildfly.management.client.helpers.ClientConstants.SUCCESS;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 import org.jboss.dmr.ModelNode;
@@ -77,6 +78,60 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
             } catch (IOException ok) {
 
             }
+        } finally {
+            safeClose(connection);
+        }
+    }
+
+    @Test
+    public void testFailedRequest() throws IOException {
+
+        server.setInitialHandler(new TestServer.TestMessageHandler() {
+            @Override
+            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+                ManagementClientChannelReceiver.safeWriteErrorResponse(context.getChannel(), context.getRequestHeader(), new IOException("failed"));
+                return null;
+            }
+        });
+
+        final ManagementConnection connection = openConnection();
+        try {
+            connection.execute(BASIC_OPERATION);
+            Assert.fail();
+        } catch (IOException ok) {
+            //OK
+        } finally {
+            safeClose(connection);
+        }
+    }
+
+    @Test
+    public void testFailedCancel() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+        server.setInitialHandler(new TestServer.TestMessageHandler() {
+            @Override
+            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+                // don't respond to the mgmt request
+                latch.countDown();
+                return new TestServer.TestMessageHandler() {
+                    @Override
+                    public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+                        ManagementClientChannelReceiver.safeWriteErrorResponse(context.getChannel(), context.getRequestHeader(), new IOException("failed"));
+                        return null;
+                    }
+                };
+            }
+        });
+
+        final ManagementConnection connection = openConnection();
+        try {
+            final Future<ModelNode> futureResponse = connection.executeAsync(BASIC_OPERATION);
+            latch.await();
+            futureResponse.cancel(false);
+            futureResponse.get();
+            Assert.fail();
+        } catch (ExecutionException ok) {
+            // OK
         } finally {
             safeClose(connection);
         }

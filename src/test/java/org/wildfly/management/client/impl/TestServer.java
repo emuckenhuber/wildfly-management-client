@@ -49,13 +49,23 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     }
 
     @Override
-    protected void handleMessage(final Channel channel, final DataInput input, final ManagementProtocolHeader header) {
+    protected synchronized void handleMessage(final Channel channel, final DataInput input, final ManagementProtocolHeader header) {
         final TestMessageHandler handler = this.handler;
         if (handler != null) {
             this.handler = handler.handleMessage(new TestMessageHandlerContext() {
                 @Override
                 public void executeAsync(Runnable r) {
                     executorService.execute(r);
+                }
+
+                @Override
+                public ManagementProtocolHeader getRequestHeader() {
+                    return header;
+                }
+
+                @Override
+                public Channel getChannel() {
+                    return channel;
                 }
 
                 @Override
@@ -97,6 +107,9 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     }
 
     static interface TestMessageHandlerContext {
+
+        ManagementProtocolHeader getRequestHeader();
+        Channel getChannel();
 
         void executeAsync(Runnable r);
 

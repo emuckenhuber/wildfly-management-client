@@ -28,6 +28,7 @@ import static org.wildfly.management.client.impl.ManagementProtocol.EXECUTE_ASYN
 import static org.wildfly.management.client.impl.ManagementProtocol.GET_INPUTSTREAM_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.HANDLE_NOTIFICATION_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.HANDLE_REPORT_REQUEST;
+import static org.wildfly.management.client.impl.ManagementProtocol.PARAM_COMMIT;
 import static org.wildfly.management.client.impl.ManagementProtocol.REGISTER_NOTIFICATION_HANDLER_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.UNREGISTER_NOTIFICATION_HANDLER_REQUEST;
 
@@ -122,9 +123,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         for (;;) {
             final int requestID = counter.incrementAndGet(this);
             request = new ExecuteRequest(requestID, operation, attachments, result);
-            if (requests.putIfAbsent(requestID, request) == null
-                    && !notificationHandlers.containsKey(requestID)) {
-                break;
+            if (requests.putIfAbsent(requestID, request) == null) {
+                if (!notificationHandlers.containsKey(requestID)) {
+                    break;
+                }
+                requests.remove(requestID);
             }
         }
         writeRequest(request, request.id);
@@ -138,9 +141,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             final int requestID = counter.incrementAndGet(this);
             final NotificationExecutionContext context = new NotificationExecutionContext(handler, filter);
             request = new RegisterNotificationHandler(requestID, address, context);
-            if (requests.putIfAbsent(requestID, request) == null
-                    && !notificationHandlers.containsKey(requestID)) {
-                break;
+            if (requests.putIfAbsent(requestID, request) == null) {
+                if (!notificationHandlers.containsKey(requestID)) {
+                    break;
+                }
+                requests.remove(requestID);
             }
         }
         try {
@@ -157,9 +162,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                 for (;;) {
                     requestID = counter.incrementAndGet(ManagementConnectionImpl.this);
                     request = new UnregisterNotificationHandler(batchID);
-                    if (requests.putIfAbsent(requestID, request) == null
-                            && !notificationHandlers.containsKey(requestID)) {
-                        break;
+                    if (requests.putIfAbsent(requestID, request) == null) {
+                        if (!notificationHandlers.containsKey(requestID)) {
+                            break;
+                        }
+                        requests.remove(requestID);
                     }
                 }
                 writeRequest(request, requestID);
@@ -234,6 +241,13 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             } finally {
                 IoUtils.safeClose(os);
             }
+        } catch (IOException e) {
+            request.handleFailure(e);
+            throw e;
+        } catch (Exception e) {
+            final IOException ex = new IOException(e);
+            request.handleFailure(ex);
+            throw ex;
         } finally {
             if (!ok) {
                 requests.remove(requestId);
@@ -247,9 +261,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             for (;;) {
                 final int requestID = counter.incrementAndGet(this);
                 request = new CancelRequest(requestID, original);
-                if (requests.putIfAbsent(requestID, request) == null
-                        && !notificationHandlers.containsKey(requestID)) {
-                    break;
+                if (requests.putIfAbsent(requestID, request) == null) {
+                    if (!notificationHandlers.containsKey(requestID)) {
+                        break;
+                    }
+                    requests.remove(requestID);
                 }
             }
             writeRequest(request, request.requestID);
