@@ -59,19 +59,20 @@ import org.xnio.FutureResult;
 import org.xnio.IoUtils;
 
 /**
+ * The management connection implementation.
+ *
  * @author Emanuel Muckenhuber
  */
 class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementConnectionImpl> implements ManagementConnection, CloseHandler<Channel> {
 
-    private static final int CLOSED_FLAG = 1 << 31;
-
     private final Channel channel;
     private final Channel.Receiver receiver;
-    private final ConcurrentMap<Integer, Request> requests = new ConcurrentHashMap<>(16, 0.75f, Runtime.getRuntime().availableProcessors());
+    private final ConcurrentMap<Integer, ManagementRequest> requests = new ConcurrentHashMap<>(16, 0.75f, Runtime.getRuntime().availableProcessors());
     private final ConcurrentMap<Integer, NotificationExecutionContext> notificationHandlers = new ConcurrentHashMap<>(16, 0.75f, Runtime.getRuntime().availableProcessors());
 
     private volatile int state = 0;
     private volatile int count = 0;
+    private static final int CLOSED_FLAG = 1 << 31;
     private static final AtomicIntegerFieldUpdater<ManagementConnectionImpl> stateUpdater = AtomicIntegerFieldUpdater.newUpdater(ManagementConnectionImpl.class, "state");
     private static final AtomicIntegerFieldUpdater<ManagementConnectionImpl> counter = AtomicIntegerFieldUpdater.newUpdater(ManagementConnectionImpl.class, "count");
 
@@ -143,14 +144,14 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             }
         }
         try {
-            writeRequest(request, request.getBatchId());
+            writeRequest(request, request.getOperationId());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        final int batchID = request.getBatchId();
+        final int batchID = request.getOperationId();
         final NotificationRegistration registration = new NotificationRegistration() {
             @Override
-            public void unregister() {
+            public void unregister() throws IOException {
                 UnregisterNotificationHandler request;
                 int requestID;
                 for (;;) {
@@ -161,11 +162,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                         break;
                     }
                 }
-                try {
-                    writeRequest(request, requestID);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
+                writeRequest(request, requestID);
                 // Wait until the notification listener is unregistered
                 request.futureResult.getIoFuture().await();
 
@@ -197,7 +194,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         if (res == 0) {
             closeComplete();
         } else {
-            for (final Request request : requests.values()) {
+            for (final ManagementRequest request : requests.values()) {
                 request.asyncCancel();
             }
         }
@@ -223,11 +220,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         } while (!stateUpdater.compareAndSet(this, old, old + 1));
     }
 
-    protected void writeRequest(final Request request, int requestId) throws IOException {
+    protected void writeRequest(final ManagementRequest request, int requestId) throws IOException {
         boolean ok = false;
         try {
             increaseRequestCount();
-            final ManagementRequestHeader header = new ManagementRequestHeader(ManagementProtocol.VERSION, requestId, request.getBatchId(), request.getOperationType());
+            final ManagementRequestHeader header = new ManagementRequestHeader(ManagementProtocol.VERSION, requestId, request.getOperationId(), request.getRequestType());
             final DataOutputStream os = new DataOutputStream(channel.writeMessage());
             try {
                 header.write(os);
@@ -276,7 +273,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         if (type == ManagementProtocol.TYPE_RESPONSE) {
             // Handle response to local requests
             final ManagementResponseHeader response = (ManagementResponseHeader) header;
-            final Request request = requests.remove(response.getResponseId());
+            final ManagementRequest request = requests.remove(response.getResponseId());
             if (request == null) {
                 ManagementClientLogger.ROOT_LOGGER.noSuchRequest(response.getResponseId(), channel);
                 safeWriteErrorResponse(channel, header, ManagementClientMessages.MESSAGES.responseHandlerNotFound(response.getResponseId()));
@@ -314,7 +311,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         final byte operationID = header.getOperationId();
         switch (operationID) {
             case GET_INPUTSTREAM_REQUEST:
-                final Request request = requests.get(header.getBatchId());
+                final ManagementRequest request = requests.get(header.getBatchId());
                 if (request == null) {
                     throw new IOException("no request " + header.getBatchId());
                 }
@@ -365,7 +362,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                         notificationHandler.handleNotification(notification);
                     }
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    ManagementClientChannelReceiver.writeErrorResponse(channel, header, e);
                 }
                 ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
                 break;
@@ -387,25 +384,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
     }
 
-    interface Request {
-
-        OperationAttachments getAttachments();
-
-        int getBatchId();
-
-        byte getOperationType();
-
-        void writeRequest(DataOutput output) throws IOException;
-
-        void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException;
-
-        void handleFailure(IOException e);
-
-        void asyncCancel();
-
-    }
-
-    class ExecuteRequest extends ManagementRequestFutureImpl implements Request {
+    class ExecuteRequest extends ManagementRequestFutureImpl implements ManagementRequest {
 
         private final int id;
         private final ModelNode operation;
@@ -432,12 +411,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public byte getOperationType() {
+        public byte getRequestType() {
             return EXECUTE_ASYNC_CLIENT_REQUEST;
         }
 
         @Override
-        public int getBatchId() {
+        public int getOperationId() {
             return id;
         }
 
@@ -501,7 +480,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
     }
 
-    class CancelRequest implements Request {
+    class CancelRequest implements ManagementRequest {
 
         private final ExecuteRequest toCancel;
         private final int requestID;
@@ -512,12 +491,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public int getBatchId() {
+        public int getOperationId() {
             return toCancel.id;
         }
 
         @Override
-        public byte getOperationType() {
+        public byte getRequestType() {
             return CANCEL_ASYNC_REQUEST;
         }
 
@@ -532,8 +511,8 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public void handleFailure(IOException e) {
-            toCancel.handleFailure(e); // maybe just log?
+        public void handleFailure(IOException exception) {
+            toCancel.handleFailure(exception); // maybe just log?
             requestFinished();
         }
 
@@ -549,7 +528,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
     }
 
-    abstract class AbstractNotificationHandler implements Request {
+    abstract class AbstractNotificationHandler implements ManagementRequest {
 
         final FutureResult<ModelNode> futureResult = new FutureResult<>();
         private final int requestId;
@@ -566,7 +545,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public int getBatchId() {
+        public int getOperationId() {
             return requestId;
         }
 
@@ -606,13 +585,13 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public byte getOperationType() {
+        public byte getRequestType() {
             return REGISTER_NOTIFICATION_HANDLER_REQUEST;
         }
 
         @Override
         void completed() {
-            notificationHandlers.put(getBatchId(), handler);
+            notificationHandlers.put(getOperationId(), handler);
         }
 
         @Override
@@ -629,11 +608,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
         @Override
         void completed() {
-            notificationHandlers.remove(getBatchId());
+            notificationHandlers.remove(getOperationId());
         }
 
         @Override
-        public byte getOperationType() {
+        public byte getRequestType() {
             return UNREGISTER_NOTIFICATION_HANDLER_REQUEST;
         }
 

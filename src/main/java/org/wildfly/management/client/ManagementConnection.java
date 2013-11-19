@@ -104,7 +104,7 @@ public interface ManagementConnection extends Closeable {
         /**
          * Unregister the notification.
          */
-        void unregister();
+        void unregister() throws IOException;
     }
 
 }

@@ -51,7 +51,6 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     @Override
     protected void handleMessage(final Channel channel, final DataInput input, final ManagementProtocolHeader header) {
         final TestMessageHandler handler = this.handler;
-        System.out.println("handle message");
         if (handler != null) {
             this.handler = handler.handleMessage(new TestMessageHandlerContext() {
                 @Override

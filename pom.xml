@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.jboss</groupId>
         <artifactId>jboss-parent</artifactId>
-        <version>10</version>
+        <version>11</version>
     </parent>
 
     <groupId>org.wildfly</groupId>
@@ -22,25 +22,21 @@
         <maven.compiler.source>1.7</maven.compiler.source>
         <maven.compiler.target>1.7</maven.compiler.target>
 
+        <tools.jar>${java.home}/../lib/tools.jar</tools.jar>
+
         <!--
             Dependency versions. Please keep alphabetical.
-
-            Each version property should be of the form "version.<groupId>".
-            For example: <version.org.jboss.as>
-
-            In cases where multiple artifacts use the same groupId but have different
-            versions, add the artifactId or other qualifier to the property name.
-            For example: <version.org.jboss.as.console>
          -->
+        <version.byteman>2.1.3</version.byteman>
         <version.junit>4.11</version.junit>
-        <version.xnio>3.1.0.CR3</version.xnio>
-        <version.org.jboss.dmr>1.1.6.Final</version.org.jboss.dmr>
+        <version.xnio>3.2.0.Beta3</version.xnio>
+        <version.org.jboss.dmr>1.2.0.Final</version.org.jboss.dmr>
         <version.org.jboss.logging>3.1.3.GA</version.org.jboss.logging>
-        <version.org.jboss.logmanager>1.4.0.Final</version.org.jboss.logmanager>
+        <version.org.jboss.logmanager>1.5.0.Final</version.org.jboss.logmanager>
         <version.org.jboss.logging.processor>1.1.0.Final</version.org.jboss.logging.processor>
-        <version.org.jboss.remoting>4.0.0.Beta1</version.org.jboss.remoting>
-        <version.org.jboss.sasl>1.0.3.Final</version.org.jboss.sasl>
-        <version.org.jboss.threads>2.1.0.Final</version.org.jboss.threads>
+        <version.org.jboss.remoting>4.0.0.Beta3</version.org.jboss.remoting>
+        <version.org.jboss.sasl>1.0.4.CR1</version.org.jboss.sasl>
+        <version.org.jboss.threads>2.1.1.Final</version.org.jboss.threads>
 
         <!-- Surefire args -->
         <surefire.jpda.args/>
@@ -74,15 +70,9 @@
                             <pluginExecutions>
                                 <pluginExecution>
                                     <pluginExecutionFilter>
-                                        <groupId>
-                                            org.apache.maven.plugins
-                                        </groupId>
-                                        <artifactId>
-                                            maven-checkstyle-plugin
-                                        </artifactId>
-                                        <versionRange>
-                                            [2.5,)
-                                        </versionRange>
+                                        <groupId>org.apache.maven.plugins</groupId>
+                                        <artifactId>maven-checkstyle-plugin</artifactId>
+                                        <versionRange>[2.5,)</versionRange>
                                         <goals>
                                             <goal>checkstyle</goal>
                                         </goals>
@@ -93,6 +83,26 @@
                                 </pluginExecution>
                             </pluginExecutions>
                         </lifecycleMappingMetadata>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <!-- make sure maven puts the byteman jar in the classpath rather than in a manifest jar -->
+                        <useManifestOnlyJar>false</useManifestOnlyJar>
+                        <forkMode>once</forkMode>
+                        <parallel>false</parallel>
+                        <!-- ensure we don't inherit a byteman jar from any env settings -->
+                        <environmentVariables>
+                            <BYTEMAN_HOME></BYTEMAN_HOME>
+                        </environmentVariables>
+                        <systemProperties>
+                            <property>
+                                <name>org.jboss.byteman.home</name>
+                                <value></value>
+                            </property>
+                        </systemProperties>
                     </configuration>
                 </plugin>
             </plugins>
@@ -161,6 +171,38 @@
             <groupId>org.jboss.xnio</groupId>
             <artifactId>xnio-nio</artifactId>
             <version>${version.xnio}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.byteman</groupId>
+            <artifactId>byteman</artifactId>
+            <scope>test</scope>
+            <version>${version.byteman}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.byteman</groupId>
+            <artifactId>byteman-submit</artifactId>
+            <scope>test</scope>
+            <version>${version.byteman}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.byteman</groupId>
+            <artifactId>byteman-install</artifactId>
+            <scope>test</scope>
+            <version>${version.byteman}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.byteman</groupId>
+            <artifactId>byteman-bmunit</artifactId>
+            <scope>test</scope>
+            <version>${version.byteman}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.sun</groupId>
+            <artifactId>tools</artifactId>
+            <version>1.6</version>
+            <scope>system</scope>
+            <systemPath>${tools.jar}</systemPath>
         </dependency>
 
     </dependencies>
