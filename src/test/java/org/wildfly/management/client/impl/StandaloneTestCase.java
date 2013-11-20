@@ -18,7 +18,7 @@ import org.xnio.OptionMap;
 /**
  * @author Emanuel Muckenhuber
  */
-@Ignore("needs as running")
+@Ignore("needs WildFly running")
 public class StandaloneTestCase {
 
     private static ManagementClient client;

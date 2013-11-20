@@ -1,5 +1,6 @@
 package org.wildfly.management.client.impl;
 
+import java.io.DataInput;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -22,7 +23,7 @@ public class BasicFailureInjectionUnitTestCase extends AbstractMgmtClientTestCas
     @Test
     @BMRule(name="throw IOException on 1st write",
             targetClass = "ManagementConnectionImpl$ExecuteRequest", targetMethod = "writeRequest",
-            action = "throw new java.io.IOException()")
+            action = "throw new java.lang.RuntimeException()")
     public void testFailureOnFirstRequest() throws IOException {
         final ManagementConnection connection = openConnection();
         try {
@@ -39,12 +40,13 @@ public class BasicFailureInjectionUnitTestCase extends AbstractMgmtClientTestCas
     @Test
     @BMRule(name="throw IOException on cancel",
             targetClass = "ManagementConnectionImpl$CancelRequest", targetMethod = "writeRequest",
-            action = "throw new java.io.IOException()")
+            action = "throw new java.lang.RuntimeException()")
     public void testFailureOnCancel() throws IOException {
         final CountDownLatch latch = new CountDownLatch(1);
         server.setInitialHandler(new TestServer.TestMessageHandler() {
+
             @Override
-            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext context) {
                 // Just ignore the request
                 latch.countDown();
                 return null;

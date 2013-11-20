@@ -1,12 +1,16 @@
 package org.wildfly.management.client.impl;
 
+import static org.wildfly.management.client.impl.StreamUtils.expectHeader;
 import static org.wildfly.management.client.impl.StreamUtils.safeClose;
 import static org.wildfly.management.client.helpers.ClientConstants.OUTCOME;
 import static org.wildfly.management.client.helpers.ClientConstants.RESULT;
 import static org.wildfly.management.client.helpers.ClientConstants.SUCCESS;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -15,6 +19,7 @@ import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
 import org.junit.Test;
 import org.wildfly.management.client.ManagementConnection;
+import org.wildfly.management.client.OperationAttachments;
 
 /**
  * @author Emanuel Muckenhuber
@@ -43,14 +48,13 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
     public void testBasicRequest() throws Exception {
         server.setInitialHandler(new TestServer.AbstractMessageHandler() {
             @Override
-            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
-                context.writeMessage(this);
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext context) {
+                context.sendResponse(this);
                 return null;
             }
 
             @Override
             public void writeMessage(DataOutput os) throws IOException {
-                os.write(ManagementProtocol.PARAM_RESPONSE);
                 SUCCESS_FULL_RESPONSE.writeExternal(os);
             }
         });
@@ -88,7 +92,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
         server.setInitialHandler(new TestServer.TestMessageHandler() {
             @Override
-            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext context) {
                 ManagementClientChannelReceiver.safeWriteErrorResponse(context.getChannel(), context.getRequestHeader(), new IOException("failed"));
                 return null;
             }
@@ -110,12 +114,12 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
         final CountDownLatch latch = new CountDownLatch(1);
         server.setInitialHandler(new TestServer.TestMessageHandler() {
             @Override
-            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext context) {
                 // don't respond to the mgmt request
                 latch.countDown();
                 return new TestServer.TestMessageHandler() {
                     @Override
-                    public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
+                    public TestServer.TestMessageHandler handleMessage(DataInput input, TestServer.TestMessageHandlerContext context) {
                         ManagementClientChannelReceiver.safeWriteErrorResponse(context.getChannel(), context.getRequestHeader(), new IOException("failed"));
                         return null;
                     }
@@ -142,8 +146,8 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
         final CountDownLatch latch = new CountDownLatch(1);
         final TestServer.TestMessageHandler cancellationHandler = new TestServer.AbstractMessageHandler() {
             @Override
-            public TestServer.TestMessageHandler handleMessage(TestServer.TestMessageHandlerContext context) {
-                context.writeMessage(this);
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext context) {
+                context.sendResponse(this);
                 latch.countDown();
                 return null;
             }
@@ -156,7 +160,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
         server.setInitialHandler(new TestServer.AbstractMessageHandler() {
             @Override
-            public TestServer.TestMessageHandler handleMessage(final TestServer.TestMessageHandlerContext context) {
+            public TestServer.TestMessageHandler handleMessage(final DataInput dataInput, final TestServer.TestMessageHandlerContext context) {
                 final TestServer.TestMessageWriter writer = this;
                 context.executeAsync(new Runnable() {
                     @Override
@@ -166,7 +170,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }
-                        context.writeMessage(writer);
+                        context.sendResponse(writer);
                     }
                 });
                 return cancellationHandler;
@@ -174,7 +178,6 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
             @Override
             public void writeMessage(DataOutput os) throws IOException {
-                os.write(ManagementProtocol.PARAM_RESPONSE);
                 SUCCESS_FULL_RESPONSE.writeExternal(os);
             }
         });
@@ -189,6 +192,138 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
         } finally {
             safeClose(connection);
         }
+    }
+
+    @Test
+    public void testGetInputStream() throws IOException {
+        server.setInitialHandler(new TestServer.TestMessageHandler() {
+            @Override
+            public TestServer.TestMessageHandler handleMessage(final DataInput dataInput, final TestServer.TestMessageHandlerContext initialContext) {
+                // Request the input stream
+                initialContext.sendRequest(ManagementProtocol.GET_INPUTSTREAM_REQUEST, new TestServer.TestMessageWriter() {
+                    @Override
+                    public void writeMessage(DataOutput os) throws IOException {
+                        os.write(ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
+                        os.writeInt(1);
+                    }
+                });
+                // Check the input stream and write the successful response
+                return new TestServer.AbstractMessageHandler() {
+                    @Override
+                    public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext ignored) {
+                        try {
+                            expectHeader(ManagementProtocol.PARAM_INPUTSTREAM_LENGTH, dataInput.readByte());
+                            final int length = dataInput.readInt();
+                            if (length != 1) {
+                                throw new RuntimeException();
+                            }
+                            expectHeader(ManagementProtocol.PARAM_INPUTSTREAM_CONTENTS, dataInput.readByte());
+                            final byte data = dataInput.readByte();
+                            if (data != 0x01) {
+                                throw new RuntimeException();
+                            }
+                            expectHeader(ManagementProtocol.RESPONSE_END, dataInput.readByte());
+                        } catch (Exception e) {
+                            ManagementClientChannelReceiver.safeWriteErrorResponse(initialContext.getChannel(), initialContext.getRequestHeader(), e);
+                        }
+                        initialContext.sendResponse(this, initialContext);
+                        return null;
+                    }
+
+                    @Override
+                    public void writeMessage(DataOutput os) throws IOException {
+                        SUCCESS_FULL_RESPONSE.writeExternal(os);
+                    }
+                };
+            }
+        });
+
+        final ManagementConnection connection = openConnection();
+        try {
+            connection.execute(BASIC_OPERATION, new OperationAttachments() {
+                @Override
+                public int getNumberOfAttachedStreams() {
+                    return 1;
+                }
+
+                @Override
+                public int getInputStreamSize(int i) {
+                    return 1;
+                }
+
+                @Override
+                public InputStream getInputStream(int i) throws IOException {
+                    final byte[] data = new byte[1];
+                    data[0] = 0x01;
+                    return new ByteArrayInputStream(data);
+                }
+            });
+        } finally {
+            safeClose(connection);
+        }
+    }
+
+    @Test
+    public void testGetInputStreamFailure() throws IOException {
+        server.setInitialHandler(new TestServer.TestMessageHandler() {
+            @Override
+            public TestServer.TestMessageHandler handleMessage(DataInput dataInput, final TestServer.TestMessageHandlerContext initialContext) {
+                // Request the input stream
+                initialContext.sendRequest(ManagementProtocol.GET_INPUTSTREAM_REQUEST, new TestServer.TestMessageWriter() {
+                    @Override
+                    public void writeMessage(DataOutput os) throws IOException {
+                        os.write(ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
+                        os.writeInt(1);
+                    }
+                });
+                // Send response with initial context
+                return new TestServer.AbstractMessageHandler() {
+                    @Override
+                    public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext response) {
+                        try {
+                            final ManagementResponseHeader responseHeader = (ManagementResponseHeader) response.getRequestHeader();
+                            if (responseHeader.getError() == null) {
+                                throw new RuntimeException();
+                            }
+                        } catch (Exception e) {
+                            ManagementClientChannelReceiver.safeWriteErrorResponse(initialContext.getChannel(), initialContext.getRequestHeader(), e);
+                        }
+                        initialContext.sendResponse(this, initialContext);
+                        return null;
+                    }
+
+                    @Override
+                    public void writeMessage(DataOutput os) throws IOException {
+                        SUCCESS_FULL_RESPONSE.writeExternal(os);
+                    }
+                };
+            }
+        });
+
+        final ManagementConnection connection = openConnection();
+        try {
+
+            connection.execute(BASIC_OPERATION, new OperationAttachments() {
+                @Override
+                public int getNumberOfAttachedStreams() {
+                    return 1;
+                }
+
+                @Override
+                public int getInputStreamSize(int i) {
+                    return 4096;
+                }
+
+                @Override
+                public InputStream getInputStream(int i) throws IOException {
+                    throw new IOException("cannot open stream");
+                }
+            });
+
+        } finally {
+            safeClose(connection);
+        }
+
     }
 
 }

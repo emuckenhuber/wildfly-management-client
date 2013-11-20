@@ -1,11 +1,14 @@
 package org.wildfly.management.client.impl;
 
+import static org.wildfly.management.client.impl.ManagementProtocol.VERSION;
+
 import java.io.Closeable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.Endpoint;
@@ -21,8 +24,8 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
 
     private Registration registration;
 
+    private AtomicInteger requestCounter = new AtomicInteger(1);
     private volatile TestMessageHandler handler;
-
     private final ExecutorService executorService;
 
     public TestServer(ExecutorService executorService) {
@@ -52,7 +55,7 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     protected synchronized void handleMessage(final Channel channel, final DataInput input, final ManagementProtocolHeader header) {
         final TestMessageHandler handler = this.handler;
         if (handler != null) {
-            this.handler = handler.handleMessage(new TestMessageHandlerContext() {
+            this.handler = handler.handleMessage(input, new TestMessageHandlerContext() {
                 @Override
                 public void executeAsync(Runnable r) {
                     executorService.execute(r);
@@ -69,13 +72,39 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
                 }
 
                 @Override
-                public void writeMessage(TestMessageWriter writer) {
-                    final ManagementResponseHeader response = ManagementResponseHeader.create((ManagementRequestHeader) header);
+                public void sendResponse(TestMessageWriter writer) {
+                    sendResponse(writer, this);
+                }
+
+                @Override
+                public void sendResponse(TestMessageWriter writer, TestMessageHandlerContext context) {
+                    final ManagementResponseHeader response = ManagementResponseHeader.create((ManagementRequestHeader) context.getRequestHeader());
+                    try {
+                        final MessageOutputStream os = context.getChannel().writeMessage();
+                        try {
+                            final DataOutputStream dos = new DataOutputStream(os);
+                            response.write(dos);
+                            dos.write(ManagementProtocol.PARAM_RESPONSE);
+                            writer.writeMessage(dos);
+                            dos.write(ManagementProtocol.PARAM_END);
+                            dos.write(ManagementProtocol.REQUEST_END);
+                            dos.close();
+                        } finally {
+                            StreamUtils.safeClose(os);
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                @Override
+                public void sendRequest(byte operationType, TestMessageWriter writer) {
+                    final ManagementRequestHeader requestHeader = new ManagementRequestHeader(VERSION, requestCounter.incrementAndGet(), ((ManagementRequestHeader) header).getBatchId(), operationType);
                     try {
                         final MessageOutputStream os = channel.writeMessage();
                         try {
                             final DataOutputStream dos = new DataOutputStream(os);
-                            response.write(dos);
+                            requestHeader.write(dos);
                             writer.writeMessage(dos);
                             dos.write(ManagementProtocol.REQUEST_END);
                             dos.close();
@@ -102,7 +131,7 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
 
     static interface TestMessageHandler {
 
-        TestMessageHandler handleMessage(TestMessageHandlerContext context);
+        TestMessageHandler handleMessage(DataInput dataInput, TestMessageHandlerContext context);
 
     }
 
@@ -113,7 +142,9 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
 
         void executeAsync(Runnable r);
 
-        void writeMessage(TestMessageWriter writer);
+        void sendResponse(TestMessageWriter writer);
+        void sendResponse(TestMessageWriter writer, TestMessageHandlerContext context);
+        void sendRequest(byte operationType, TestMessageWriter writer);
 
     }
 
