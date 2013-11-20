@@ -28,7 +28,6 @@ import static org.wildfly.management.client.impl.ManagementProtocol.EXECUTE_ASYN
 import static org.wildfly.management.client.impl.ManagementProtocol.GET_INPUTSTREAM_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.HANDLE_NOTIFICATION_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.HANDLE_REPORT_REQUEST;
-import static org.wildfly.management.client.impl.ManagementProtocol.PARAM_COMMIT;
 import static org.wildfly.management.client.impl.ManagementProtocol.REGISTER_NOTIFICATION_HANDLER_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.UNREGISTER_NOTIFICATION_HANDLER_REQUEST;
 
@@ -51,7 +50,6 @@ import org.jboss.remoting3.spi.AbstractHandleableCloseable;
 import org.wildfly.management.client.ManagementClientLogger;
 import org.wildfly.management.client.ManagementClientMessages;
 import org.wildfly.management.client.ManagementConnection;
-import org.wildfly.management.client.MessageSeverity;
 import org.wildfly.management.client.Notification;
 import org.wildfly.management.client.NotificationFilter;
 import org.wildfly.management.client.NotificationHandler;
@@ -383,14 +381,15 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                 ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
                 break;
             case HANDLE_REPORT_REQUEST:
-
-                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE_SEVERITY);
-                final MessageSeverity severity = Enum.valueOf(MessageSeverity.class, input.readUTF());
-                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE);
-                final String message = input.readUTF();
-                StreamUtils.expectHeader(input, ManagementProtocol.REQUEST_END);
-
                 // TODO do something with the message
+
+//                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE_SEVERITY);
+//                final MessageSeverity severity = Enum.valueOf(MessageSeverity.class, input.readUTF());
+//                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE);
+//                final String message = input.readUTF();
+//                StreamUtils.expectHeader(input, ManagementProtocol.REQUEST_END);
+
+
                 // Send empty response
                 ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
 
