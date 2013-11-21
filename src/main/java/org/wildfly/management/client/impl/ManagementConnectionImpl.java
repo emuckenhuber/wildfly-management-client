@@ -31,6 +31,7 @@ import static org.wildfly.management.client.impl.ManagementProtocol.HANDLE_REPOR
 import static org.wildfly.management.client.impl.ManagementProtocol.REGISTER_NOTIFICATION_HANDLER_REQUEST;
 import static org.wildfly.management.client.impl.ManagementProtocol.UNREGISTER_NOTIFICATION_HANDLER_REQUEST;
 
+import java.io.Closeable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
@@ -47,13 +48,13 @@ import org.jboss.dmr.ModelNode;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
-import org.wildfly.management.client.ManagementClientLogger;
-import org.wildfly.management.client.ManagementClientMessages;
+import org.wildfly.management.client._private.ManagementClientLogger;
+import org.wildfly.management.client._private.ManagementClientMessages;
 import org.wildfly.management.client.ManagementConnection;
 import org.wildfly.management.client.Notification;
 import org.wildfly.management.client.NotificationFilter;
 import org.wildfly.management.client.NotificationHandler;
-import org.wildfly.management.client.OperationAttachments;
+import org.wildfly.management.client.OperationStreamAttachments;
 import org.xnio.FutureResult;
 import org.xnio.IoUtils;
 
@@ -67,7 +68,6 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
     private final Channel channel;
     private final Channel.Receiver receiver;
     private final ConcurrentMap<Integer, ManagementRequest> requests = new ConcurrentHashMap<>(16, 0.75f, Runtime.getRuntime().availableProcessors());
-    private final ConcurrentMap<Integer, NotificationExecutionContext> notificationHandlers = new ConcurrentHashMap<>(16, 0.75f, Runtime.getRuntime().availableProcessors());
 
     private volatile int state = 0;
     private volatile int count = 0;
@@ -97,35 +97,32 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
     @Override
     public ModelNode execute(final ModelNode operation) throws IOException {
-        return execute(operation, OperationAttachments.NO_ATTACHMENTS);
+        return execute(operation, OperationStreamAttachments.NO_ATTACHMENTS);
     }
 
     @Override
-    public ModelNode execute(final ModelNode operation, final OperationAttachments attachments) throws IOException {
+    public ModelNode execute(final ModelNode operation, final OperationStreamAttachments attachments) throws IOException {
         return internalExecute(operation, attachments).futureResult.getIoFuture().get();
     }
 
     @Override
     public Future<ModelNode> executeAsync(final ModelNode operation) throws IOException {
-        return executeAsync(operation, OperationAttachments.NO_ATTACHMENTS);
+        return executeAsync(operation, OperationStreamAttachments.NO_ATTACHMENTS);
     }
 
     @Override
-    public Future<ModelNode> executeAsync(final ModelNode operation, final OperationAttachments attachments) throws IOException {
+    public Future<ModelNode> executeAsync(final ModelNode operation, final OperationStreamAttachments attachments) throws IOException {
         return internalExecute(operation, attachments);
     }
 
-    private ExecuteRequest internalExecute(final ModelNode operation, final OperationAttachments attachments) throws IOException {
+    private ExecuteRequest internalExecute(final ModelNode operation, final OperationStreamAttachments attachments) throws IOException {
         ExecuteRequest request;
         final FutureResult<ModelNode> result = new FutureResult<>();
         for (;;) {
             final int requestID = counter.incrementAndGet(this);
             request = new ExecuteRequest(requestID, operation, attachments, result);
             if (requests.putIfAbsent(requestID, request) == null) {
-                if (!notificationHandlers.containsKey(requestID)) {
-                    break;
-                }
-                requests.remove(requestID);
+                break;
             }
         }
         writeRequest(request, request.id);
@@ -133,17 +130,14 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
     }
 
     @Override
-    public NotificationRegistration registerNotificationHandler(final ModelNode address, final NotificationHandler handler, final NotificationFilter filter) {
+    public Closeable registerNotificationHandler(final ModelNode address, final NotificationHandler handler, final NotificationFilter filter) {
         RegisterNotificationHandler request;
         for (;;) {
             final int requestID = counter.incrementAndGet(this);
             final NotificationExecutionContext context = new NotificationExecutionContext(handler, filter);
             request = new RegisterNotificationHandler(requestID, address, context);
             if (requests.putIfAbsent(requestID, request) == null) {
-                if (!notificationHandlers.containsKey(requestID)) {
-                    break;
-                }
-                requests.remove(requestID);
+                break;
             }
         }
         try {
@@ -152,19 +146,16 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             throw new RuntimeException(e);
         }
         final int batchID = request.getOperationId();
-        final NotificationRegistration registration = new NotificationRegistration() {
+        final Closeable registration = new Closeable() {
             @Override
-            public void unregister() throws IOException {
+            public void close() throws IOException {
                 UnregisterNotificationHandler request;
                 int requestID;
                 for (;;) {
                     requestID = counter.incrementAndGet(ManagementConnectionImpl.this);
                     request = new UnregisterNotificationHandler(batchID);
                     if (requests.putIfAbsent(requestID, request) == null) {
-                        if (!notificationHandlers.containsKey(requestID)) {
-                            break;
-                        }
-                        requests.remove(requestID);
+                        break;
                     }
                 }
                 writeRequest(request, requestID);
@@ -183,7 +174,8 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         closeAsync();
     }
 
-    protected void requestFinished() {
+    protected void requestFinished(final int requestID) {
+        requests.remove(requestID);
         int res = stateUpdater.decrementAndGet(this);
         if (res == CLOSED_FLAG) {
             closeComplete();
@@ -209,7 +201,6 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
     protected void closeComplete() {
         try {
             channel.closeAsync(); // make sure the channel is closed
-            notificationHandlers.clear(); // clear the notification handlers
         } finally {
             super.closeComplete();
         }
@@ -260,10 +251,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                 final int requestID = counter.incrementAndGet(this);
                 request = new CancelRequest(requestID, original);
                 if (requests.putIfAbsent(requestID, request) == null) {
-                    if (!notificationHandlers.containsKey(requestID)) {
-                        break;
-                    }
-                    requests.remove(requestID);
+                    break;
                 }
             }
             writeRequest(request, request.requestID);
@@ -287,11 +275,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         if (type == ManagementProtocol.TYPE_RESPONSE) {
             // Handle response to local requests
             final ManagementResponseHeader response = (ManagementResponseHeader) header;
-            final ManagementRequest request = requests.remove(response.getResponseId());
+            final ManagementRequest request = requests.get(response.getResponseId());
             if (request == null) {
                 ManagementClientLogger.ROOT_LOGGER.noSuchRequest(response.getResponseId(), channel);
                 safeWriteErrorResponse(channel, header, ManagementClientMessages.MESSAGES.responseHandlerNotFound(response.getResponseId()));
-            } else if (response.getError() != null) {
+            } else if (response.isFailed()) {
                 request.handleFailure(new IOException(response.getError()));
             } else {
                 try {
@@ -325,74 +313,30 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         final byte operationID = header.getOperationId();
         switch (operationID) {
             case GET_INPUTSTREAM_REQUEST:
-                final ManagementRequest request = requests.get(header.getBatchId());
-                if (request == null) {
-                    throw new IOException("no request " + header.getBatchId());
-                }
-                // Read the inputStream index
-                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
-                final int index = input.readInt();
-                // Execute async
-                getExecutor().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            final OperationAttachments attachments = request.getAttachments();
-                            final InputStream is = attachments.getInputStream(index);
-                            try {
-                                final ManagementResponseHeader response = ManagementResponseHeader.create(header);
-                                final OutputStream os = channel.writeMessage();
-                                try {
-                                    final DataOutput output = new DataOutputStream(os);
-                                    // Write header
-                                    response.write(output);
-                                    output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_LENGTH);
-                                    output.writeInt(attachments.getInputStreamSize(index));
-                                    output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_CONTENTS);
-                                    StreamUtils.copyStream(is, output);
-                                    output.writeByte(ManagementProtocol.RESPONSE_END);
-                                    os.close();
-                                } finally {
-                                    StreamUtils.safeClose(os);
-                                }
-                            } finally {
-                                StreamUtils.safeClose(is);
-                            }
-                        } catch (Exception e) {
-                            safeWriteErrorResponse(channel, header, e);
-                        }
-                    }
-                });
-                break;
             case HANDLE_NOTIFICATION_REQUEST:
-                final ModelNode notif = new ModelNode();
-                notif.readExternal(input);
-                final Notification notification = Notification.fromModelNode(notif);
-                final NotificationExecutionContext context = notificationHandlers.get(header.getBatchId());
-                try {
-                    final NotificationFilter filter = context.getFilter();
-                    if (filter.isNotificationEnabled(notification)) {
-                        NotificationHandler notificationHandler = context.getHandler();
-                        notificationHandler.handleNotification(notification);
-                    }
-                } catch (Exception e) {
-                    ManagementClientChannelReceiver.writeErrorResponse(channel, header, e);
+
+                final ManagementRequest originating = requests.get(header.getBatchId());
+                if (originating == null) {
+                    ManagementClientChannelReceiver.safeWriteErrorResponse(channel, header, new IOException("no such request " + header.getBatchId()));
+                    break;
                 }
-                ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
+                final ManagementRequest.RequestHandler handler = originating.getRequestHandler();
+
+                try {
+                    handler.handleRequest(originating, header, input);
+                } catch (Exception e) {
+                    ManagementClientChannelReceiver.safeWriteErrorResponse(channel, header, e);
+                }
                 break;
             case HANDLE_REPORT_REQUEST:
                 // TODO do something with the message
-
 //                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE_SEVERITY);
 //                final MessageSeverity severity = Enum.valueOf(MessageSeverity.class, input.readUTF());
 //                StreamUtils.expectHeader(input, ManagementProtocol.PARAM_MESSAGE);
 //                final String message = input.readUTF();
 //                StreamUtils.expectHeader(input, ManagementProtocol.REQUEST_END);
-
-
                 // Send empty response
                 ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
-
                 break;
             default:
                 throw new IOException("no such operation id");
@@ -403,11 +347,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
         private final int id;
         private final ModelNode operation;
-        private final OperationAttachments attachments;
+        private final OperationStreamAttachments attachments;
         private final FutureResult<ModelNode> futureResult;
         private boolean cancelled = false;
+        private final AttachmentsHandler attachmentsHandler = new AttachmentsHandler();
 
-        ExecuteRequest(final int id, final ModelNode operation, final OperationAttachments attachments, final FutureResult<ModelNode> result) {
+        ExecuteRequest(final int id, final ModelNode operation, final OperationStreamAttachments attachments, final FutureResult<ModelNode> result) {
             super(result.getIoFuture());
             this.futureResult = result;
             this.attachments = attachments;
@@ -436,7 +381,12 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public OperationAttachments getAttachments() {
+        public RequestHandler getRequestHandler() {
+            return attachmentsHandler;
+        }
+
+        @Override
+        public OperationStreamAttachments getAttachments() {
             return attachments;
         }
 
@@ -454,7 +404,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                     finished = futureResult.setResult(node);
                 }
                 if (finished) {
-                    requestFinished();
+                    requestFinished(id);
                 }
             }
             StreamUtils.expectHeader(input, ManagementProtocol.RESPONSE_END);
@@ -482,16 +432,63 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         public void handleFailure(IOException exception) {
             if (futureResult.setException(exception)) {
                 exception.printStackTrace();
-                requestFinished();
+                requestFinished(id);
             }
         }
 
         protected boolean setCancelled() {
             if (futureResult.setCancelled()) {
-                requestFinished();
+                requestFinished(id);
                 return true;
             }
             return false;
+        }
+    }
+
+    class AttachmentsHandler implements ManagementRequest.RequestHandler {
+
+        @Override
+        public void handleRequest(ManagementRequest request, final ManagementRequestHeader header, DataInput input) throws IOException {
+            // Read the inputStream index
+            StreamUtils.expectHeader(input, ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
+            final int index = input.readInt();
+            final OperationStreamAttachments attachments = request.getAttachments();
+            final long streamSize = attachments.getInputStreamSize(index);
+            final int streamLengthParam = (int) streamSize;
+            if (streamSize != streamLengthParam) {
+                throw new IOException("Input stream size out of range: " + streamSize);
+            }
+            // Execute async
+            getExecutor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+
+                        final InputStream is = attachments.getInputStream(index);
+                        try {
+                            final ManagementResponseHeader response = ManagementResponseHeader.create(header);
+                            final OutputStream os = channel.writeMessage();
+                            try {
+                                final DataOutput output = new DataOutputStream(os);
+                                // Write header
+                                response.write(output);
+                                output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_LENGTH);
+                                output.writeInt(streamLengthParam);
+                                output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_CONTENTS);
+                                StreamUtils.copyStream(is, output);
+                                output.writeByte(ManagementProtocol.RESPONSE_END);
+                                os.close();
+                            } finally {
+                                StreamUtils.safeClose(os);
+                            }
+                        } finally {
+                            StreamUtils.safeClose(is);
+                        }
+                    } catch (Exception e) {
+                        safeWriteErrorResponse(channel, header, e);
+                    }
+                }
+            });
         }
     }
 
@@ -503,6 +500,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         CancelRequest(final int requestID, final ExecuteRequest toCancel) {
             this.toCancel = toCancel;
             this.requestID = requestID;
+        }
+
+        @Override
+        public RequestHandler getRequestHandler() {
+            return null;
         }
 
         @Override
@@ -521,20 +523,20 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
-        public OperationAttachments getAttachments() {
-            return OperationAttachments.NO_ATTACHMENTS;
+        public OperationStreamAttachments getAttachments() {
+            return OperationStreamAttachments.NO_ATTACHMENTS;
         }
 
         @Override
         public void handleFailure(IOException exception) {
             toCancel.handleFailure(exception); // maybe just log?
-            requestFinished();
+            requestFinished(requestID);
         }
 
         @Override
         public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
             // toCancel.setCancelled() // wait for original response
-            requestFinished();
+            requestFinished(requestID);
         }
 
         @Override
@@ -555,8 +557,8 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         abstract void completed();
 
         @Override
-        public OperationAttachments getAttachments() {
-            return OperationAttachments.NO_ATTACHMENTS;
+        public OperationStreamAttachments getAttachments() {
+            return OperationStreamAttachments.NO_ATTACHMENTS;
         }
 
         @Override
@@ -568,14 +570,14 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
             if (futureResult.setResult(null)) {
                 completed();
-                requestFinished();
+                requestFinished(requestId);
             }
         }
 
         @Override
         public void handleFailure(IOException exception) {
             if (futureResult.setException(exception)) {
-                requestFinished();
+                requestFinished(requestId);
             }
         }
 
@@ -583,7 +585,9 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         public void asyncCancel() {
             // don't wait for the remote response just cancel
             if (futureResult.setCancelled()) {
-                requestFinished();
+                requestFinished(requestId);
+            } else {
+                requestFinished(requestId);
             }
         }
     }
@@ -591,12 +595,17 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
     class RegisterNotificationHandler extends AbstractNotificationHandler {
 
         private final ModelNode address;
-        private final NotificationExecutionContext handler;
+        private final RemoteNotificationHandler handler;
 
         RegisterNotificationHandler(final int requestId, final ModelNode address, final NotificationExecutionContext handler) {
             super(requestId);
             this.address = address;
-            this.handler = handler;
+            this.handler = new RemoteNotificationHandler(handler);
+        }
+
+        @Override
+        public void handleResponse(ManagementResponseHeader header, DataInput input) throws IOException {
+            futureResult.setResult(null);
         }
 
         @Override
@@ -605,13 +614,52 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
+        public RequestHandler getRequestHandler() {
+            return handler;
+        }
+
+        @Override
         void completed() {
-            notificationHandlers.put(getOperationId(), handler);
+
         }
 
         @Override
         public void writeRequest(DataOutput output) throws IOException {
             address.writeExternal(output);
+        }
+    }
+
+    class RemoteNotificationHandler implements ManagementRequest.RequestHandler {
+
+        private final NotificationExecutionContext context;
+        protected RemoteNotificationHandler(NotificationExecutionContext context) {
+            this.context = context;
+        }
+
+        @Override
+        public void handleRequest(final ManagementRequest originating, final ManagementRequestHeader header, final DataInput input) throws IOException {
+            final ModelNode notif = new ModelNode();
+            notif.readExternal(input);
+            final Notification notification = Notification.fromModelNode(notif);
+            getExecutor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        final NotificationFilter filter = context.getFilter();
+                        if (filter.isNotificationEnabled(notification)) {
+                            NotificationHandler notificationHandler = context.getHandler();
+                            notificationHandler.handleNotification(notification);
+                        }
+                    } catch (Exception e) {
+                        ManagementClientChannelReceiver.safeWriteErrorResponse(channel, header, e);
+                    }
+                    try {
+                        ManagementClientChannelReceiver.writeEmptyResponse(channel, header);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            });
         }
     }
 
@@ -622,8 +670,13 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
         }
 
         @Override
+        public RequestHandler getRequestHandler() {
+            return null;
+        }
+
+        @Override
         void completed() {
-            notificationHandlers.remove(getOperationId());
+
         }
 
         @Override
@@ -638,7 +691,7 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
     }
 
-    private class NotificationExecutionContext {
+    private static class NotificationExecutionContext {
         private final NotificationHandler handler;
         private final NotificationFilter filter;
 

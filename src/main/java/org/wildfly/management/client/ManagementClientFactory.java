@@ -25,6 +25,7 @@ package org.wildfly.management.client;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.ServiceLoader;
+import java.util.concurrent.ExecutorService;
 
 import org.xnio.OptionMap;
 
@@ -44,10 +45,33 @@ public abstract class ManagementClientFactory {
      * @return the management client factory
      */
     public static ManagementClientFactory getInstance() {
+        return getInstance(null);
+    }
+
+    /**
+     * Get an instance of the management client factory.
+     *
+     * @param type the preferred protocol type
+     * @return the management client factory, {@code null} if no matching implementation was found
+     */
+    public static ManagementClientFactory getInstance(final String type) {
         final ServiceLoader<ManagementClientFactory> loader = ServiceLoader.load(ManagementClientFactory.class);
         final Iterator<ManagementClientFactory> i = loader.iterator();
-        return i.next();
+        while (i.hasNext()) {
+            final ManagementClientFactory factory = i.next();
+            if (type == null || type.equals(factory.getType())) {
+                return factory;
+            }
+        }
+        return null;
     }
+
+    /**
+     * Get the factory type.
+     *
+     * @return the type
+     */
+    protected abstract String getType();
 
     /**
      * Create an instance of a management client using the default options.
@@ -65,5 +89,15 @@ public abstract class ManagementClientFactory {
      * @throws IOException
      */
     public abstract ManagementClient createClient(OptionMap options) throws IOException;
+
+    /**
+     * Create an instance of a management client with a given executor.
+     *
+     * @param executorService the executor service
+     * @param options the options
+     * @return the management client
+     * @throws IOException
+     */
+    public abstract ManagementClient createClient(ExecutorService executorService, OptionMap options) throws IOException;
 
 }

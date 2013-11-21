@@ -29,11 +29,11 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * The operation attachments.
+ * The operation stream attachments.
  *
  * @author Emanuel Muckenhuber
  */
-public interface OperationAttachments {
+public interface OperationStreamAttachments {
 
     /**
      * Get the number of attached streams.
@@ -43,15 +43,16 @@ public interface OperationAttachments {
     int getNumberOfAttachedStreams();
 
     /**
-     * Get the input stream size.
+     * Get the size of a given input stream.
      *
      * @param i the input stream index
      * @return the stream size
      */
-    int getInputStreamSize(int i);
+    long getInputStreamSize(int i);
 
     /**
-     * Get the input stream for a give input-stream index.
+     * Get the input stream for a given input-stream index. The input stream is going to be closed
+     * automatically.
      *
      * @param i the input stream index
      * @return the input stream
@@ -59,7 +60,7 @@ public interface OperationAttachments {
      */
     InputStream getInputStream(int i) throws IOException;
 
-    OperationAttachments NO_ATTACHMENTS = new OperationAttachments() {
+    OperationStreamAttachments NO_ATTACHMENTS = new OperationStreamAttachments() {
 
         @Override
         public int getNumberOfAttachedStreams() {
@@ -72,12 +73,12 @@ public interface OperationAttachments {
         }
 
         @Override
-        public int getInputStreamSize(int i) {
+        public long getInputStreamSize(int i) {
             return -1;
         }
     };
 
-    public class FileOperationAttachments implements OperationAttachments {
+    public class FileOperationAttachments implements OperationStreamAttachments {
 
         final File[] files;
 
@@ -89,6 +90,11 @@ public interface OperationAttachments {
             for (final File file : files) {
                 if (!file.isFile() || !file.canRead()) {
                     throw new FileNotFoundException(file.getAbsolutePath());
+                }
+                final long length = file.length();
+                final int value = (int) length;
+                if (length != value) {
+                    throw new IOException("Input stream size out of range: " + length);
                 }
             }
             return new FileOperationAttachments(files);
@@ -104,8 +110,8 @@ public interface OperationAttachments {
         }
 
         @Override
-        public int getInputStreamSize(int i) {
-            return (int) getFile(i).length();
+        public long getInputStreamSize(int i) {
+            return getFile(i).length();
         }
 
         @Override

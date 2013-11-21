@@ -26,7 +26,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
-import org.wildfly.management.client.OperationAttachments;
+import org.wildfly.management.client.OperationStreamAttachments;
 
 /**
  * A management request.
@@ -40,7 +40,7 @@ interface ManagementRequest {
      *
      * @return the operation attachments
      */
-    OperationAttachments getAttachments();
+    OperationStreamAttachments getAttachments();
 
     /**
      * Get the request operation id.
@@ -55,6 +55,13 @@ interface ManagementRequest {
      * @return the request type
      */
     byte getRequestType();
+
+    /**
+     * Get an optional request handler.
+     *
+     * @return the request handler
+     */
+    RequestHandler getRequestHandler();
 
     /**
      * Write the request.
@@ -84,5 +91,19 @@ interface ManagementRequest {
      * Async cancel the request
      */
     void asyncCancel();
+
+    interface RequestHandler {
+
+        /**
+         * Handle a server request.
+         *
+         * @param originating the associated request
+         * @param header      the protocol header
+         * @param input       the data input
+         * @throws IOException
+         */
+        void handleRequest(ManagementRequest originating, final ManagementRequestHeader header, DataInput input) throws IOException;
+
+    }
 
 }

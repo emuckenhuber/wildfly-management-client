@@ -22,7 +22,7 @@
 
 package org.wildfly.management.client.impl;
 
-import static org.wildfly.management.client.ManagementClientMessages.MESSAGES;
+import static org.wildfly.management.client._private.ManagementClientMessages.MESSAGES;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -102,6 +102,15 @@ class ManagementResponseHeader extends ManagementProtocolHeader {
      */
     public String getError() {
         return error;
+    }
+
+    /**
+     * Whether the response failed.
+     *
+     * @return
+     */
+    public boolean isFailed() {
+        return failed;
     }
 
     @Override

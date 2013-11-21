@@ -22,7 +22,7 @@
 
 package org.wildfly.management.client.impl;
 
-import static org.wildfly.management.client.ManagementClientLogger.ROOT_LOGGER;
+import static org.wildfly.management.client._private.ManagementClientLogger.ROOT_LOGGER;
 
 import java.io.DataInput;
 import java.io.DataInputStream;
@@ -31,7 +31,7 @@ import java.io.IOException;
 
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.MessageInputStream;
-import org.wildfly.management.client.ManagementClientLogger;
+import org.wildfly.management.client._private.ManagementClientLogger;
 
 /**
  * @author Emanuel Muckenhuber

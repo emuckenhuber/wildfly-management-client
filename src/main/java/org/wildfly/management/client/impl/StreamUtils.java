@@ -22,8 +22,8 @@
 
 package org.wildfly.management.client.impl;
 
-import static org.wildfly.management.client.ManagementClientLogger.ROOT_LOGGER;
-import static org.wildfly.management.client.ManagementClientMessages.MESSAGES;
+import static org.wildfly.management.client._private.ManagementClientLogger.ROOT_LOGGER;
+import static org.wildfly.management.client._private.ManagementClientMessages.MESSAGES;
 
 import java.io.Closeable;
 import java.io.DataInput;

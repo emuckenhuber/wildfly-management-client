@@ -49,8 +49,8 @@ import org.jboss.remoting3.Connection;
 import org.jboss.remoting3.Endpoint;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
 import org.wildfly.management.client.ManagementClient;
-import org.wildfly.management.client.ManagementClientLogger;
-import org.wildfly.management.client.ManagementClientMessages;
+import org.wildfly.management.client._private.ManagementClientLogger;
+import org.wildfly.management.client._private.ManagementClientMessages;
 import org.wildfly.management.client.ManagementClientOptions;
 import org.wildfly.management.client.ManagementConnection;
 import org.xnio.Cancellable;
@@ -245,7 +245,7 @@ class ManagementClientImpl extends AbstractHandleableCloseable<ManagementClientI
                 t.setStackTrace(allocationStackTrace);
                 ManagementClientLogger.ROOT_LOGGER.leakedControllerClient(t);
                 // Close
-                StreamUtils.safeClose(this);
+                closeAsync();
             }
         } finally {
             super.finalize();

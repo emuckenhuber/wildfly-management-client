@@ -19,7 +19,7 @@ import org.jboss.dmr.ModelNode;
 import org.junit.Assert;
 import org.junit.Test;
 import org.wildfly.management.client.ManagementConnection;
-import org.wildfly.management.client.OperationAttachments;
+import org.wildfly.management.client.OperationStreamAttachments;
 
 /**
  * @author Emanuel Muckenhuber
@@ -240,14 +240,14 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
         final ManagementConnection connection = openConnection();
         try {
-            connection.execute(BASIC_OPERATION, new OperationAttachments() {
+            connection.execute(BASIC_OPERATION, new OperationStreamAttachments() {
                 @Override
                 public int getNumberOfAttachedStreams() {
                     return 1;
                 }
 
                 @Override
-                public int getInputStreamSize(int i) {
+                public long getInputStreamSize(int i) {
                     return 1;
                 }
 
@@ -282,7 +282,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
                     public TestServer.TestMessageHandler handleMessage(DataInput dataInput, TestServer.TestMessageHandlerContext response) {
                         try {
                             final ManagementResponseHeader responseHeader = (ManagementResponseHeader) response.getRequestHeader();
-                            if (responseHeader.getError() == null) {
+                            if (!responseHeader.isFailed()) {
                                 throw new RuntimeException();
                             }
                         } catch (Exception e) {
@@ -303,15 +303,15 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
         final ManagementConnection connection = openConnection();
         try {
 
-            connection.execute(BASIC_OPERATION, new OperationAttachments() {
+            connection.execute(BASIC_OPERATION, new OperationStreamAttachments() {
                 @Override
                 public int getNumberOfAttachedStreams() {
                     return 1;
                 }
 
                 @Override
-                public int getInputStreamSize(int i) {
-                    return 4096;
+                public long getInputStreamSize(int i) {
+                    return 4096L;
                 }
 
                 @Override

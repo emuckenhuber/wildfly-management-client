@@ -45,7 +45,7 @@ import org.jboss.remoting3.remote.RemoteConnectionProviderFactory;
 import org.jboss.threads.JBossThreadFactory;
 import org.wildfly.management.client.ManagementClient;
 import org.wildfly.management.client.ManagementClientFactory;
-import org.wildfly.management.client.ManagementClientLogger;
+import org.wildfly.management.client._private.ManagementClientLogger;
 import org.wildfly.management.client.ManagementConnection;
 import org.xnio.FutureResult;
 import org.xnio.IoFuture;
@@ -64,6 +64,11 @@ public final class ManagementClientFactoryImpl extends ManagementClientFactory {
     // Global count of created pools
     private static final AtomicInteger executorCount = new AtomicInteger();
 
+    @Override
+    protected String getType() {
+        return "native";
+    }
+
     static ExecutorService createDefaultExecutor() {
         final ThreadGroup group = new ThreadGroup("management-client-thread");
         final ThreadFactory threadFactory = new JBossThreadFactory(group, Boolean.FALSE, null, "%G " + executorCount.incrementAndGet() + "-%t", null, null, doPrivileged(new PrivilegedAction<AccessControlContext>() {
@@ -71,7 +76,15 @@ public final class ManagementClientFactoryImpl extends ManagementClientFactory {
                 return AccessController.getContext();
             }
         }));
-        return new ThreadPoolExecutor(2, ManagementClientDefaults.DEFAULT_MAX_THREADS, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), threadFactory);
+        return new ThreadPoolExecutor(1, ManagementClientDefaults.DEFAULT_MAX_THREADS, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), threadFactory);
+    }
+
+    static Endpoint createDefaultEndpoint(final OptionMap options) throws IOException {
+        final Endpoint endpoint = Remoting.createEndpoint(ManagementClientDefaults.DEFAULT_ENDPOINT_NAME, xnio, options);
+        endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.EMPTY);
+        endpoint.addConnectionProvider("http-remoting", new HttpUpgradeConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
+        endpoint.addConnectionProvider("https-remoting", new HttpUpgradeConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.TRUE));
+        return endpoint;
     }
 
     @Override
@@ -83,10 +96,7 @@ public final class ManagementClientFactoryImpl extends ManagementClientFactory {
     public ManagementClient createClient(final OptionMap options) throws IOException {
         final OptionMap actual = OptionMap.builder().addAll(DEFAULT_OPTIONS).addAll(options).getMap();
 
-        final Endpoint endpoint = Remoting.createEndpoint(ManagementClientDefaults.DEFAULT_ENDPOINT_NAME, xnio, actual);
-        endpoint.addConnectionProvider("remote", new RemoteConnectionProviderFactory(), OptionMap.EMPTY);
-        endpoint.addConnectionProvider("http-remoting", new HttpUpgradeConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.FALSE));
-        endpoint.addConnectionProvider("https-remoting", new HttpUpgradeConnectionProviderFactory(), OptionMap.create(Options.SSL_ENABLED, Boolean.TRUE));
+        final Endpoint endpoint = createDefaultEndpoint(actual);
         final ExecutorService executorService = createDefaultExecutor();
 
         // Create the client and make sure we cleanup resources on close
@@ -100,6 +110,24 @@ public final class ManagementClientFactoryImpl extends ManagementClientFactory {
                     ManagementClientLogger.ROOT_LOGGER.debugf(e, "failed to shutdown endpoint");
                 } finally {
                     executorService.shutdownNow();
+                }
+            }
+        });
+        return client;
+    }
+
+    @Override
+    public ManagementClient createClient(ExecutorService executorService, OptionMap options) throws IOException {
+        final OptionMap actual = OptionMap.builder().addAll(DEFAULT_OPTIONS).addAll(options).getMap();
+        final Endpoint endpoint = createDefaultEndpoint(actual);
+        final ManagementClientImpl client = createClient(endpoint, options, executorService);
+        client.addCloseHandler(new CloseHandler<ManagementClientImpl>() {
+            @Override
+            public void handleClose(ManagementClientImpl managementClient, IOException i) {
+                try {
+                    endpoint.close();
+                } catch (IOException e) {
+                    ManagementClientLogger.ROOT_LOGGER.debugf(e, "failed to shutdown endpoint");
                 }
             }
         });

@@ -22,7 +22,7 @@
 
 package org.wildfly.management.client.helpers;
 
-import static org.wildfly.management.client.ManagementClientMessages.MESSAGES;
+import static org.wildfly.management.client._private.ManagementClientMessages.MESSAGES;
 
 
 /**

@@ -52,7 +52,7 @@ public interface ManagementConnection extends Closeable {
      * @return the result of the operation
      * @throws java.io.IOException if an I/O error occurs while executing the operation
      */
-    ModelNode execute(ModelNode operation, OperationAttachments attachments) throws IOException;
+    ModelNode execute(ModelNode operation, OperationStreamAttachments attachments) throws IOException;
 
     /**
      * Execute an operation asynchronously.
@@ -69,7 +69,7 @@ public interface ManagementConnection extends Closeable {
      * @param attachments the operation attachments
      * @return the future result of the operation
      */
-    Future<ModelNode> executeAsync(ModelNode operation, OperationAttachments attachments) throws IOException;
+    Future<ModelNode> executeAsync(ModelNode operation, OperationStreamAttachments attachments) throws IOException;
 
     /**
      * Register the given NotificationHandler to receive notifications emitted by the resource at the given source address.
@@ -81,8 +81,9 @@ public interface ManagementConnection extends Closeable {
      * @param address the address of the resource(s) that emit notifications.
      * @param handler the notification handler
      * @param filter  the notification filter. Use {@link NotificationFilter#ALL} to let the handler always handle notifications
+     * @return a {@code Closeable} which can be used to unregister the notification handler.
      */
-    NotificationRegistration registerNotificationHandler(ModelNode address, NotificationHandler handler, NotificationFilter filter);
+    Closeable registerNotificationHandler(ModelNode address, NotificationHandler handler, NotificationFilter filter);
 
     /**
      * Wait for a resource close to complete.
@@ -95,16 +96,5 @@ public interface ManagementConnection extends Closeable {
      * Wait for a resource close to complete.
      */
     void awaitClosedUninterruptibly();
-
-    /**
-     * Unregister a previously registered NotificationHandler.
-     */
-    interface NotificationRegistration {
-
-        /**
-         * Unregister the notification.
-         */
-        void unregister() throws IOException;
-    }
 
 }

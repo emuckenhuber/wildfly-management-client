@@ -1,12 +1,12 @@
 package org.wildfly.management.client.impl;
 
+import java.io.Closeable;
 import java.io.DataInput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jboss.dmr.ModelNode;
 import org.jboss.remoting3.Channel;
@@ -29,10 +29,12 @@ public class BasicNotificationsUnitTestCase extends AbstractMgmtClientTestCase {
     @Test
     public void testBasicNotifications() throws Exception {
 
+        final int notificationCount = 10;
+
         final ServerHandler serverHandler = new ServerHandler();
         server.setInitialHandler(serverHandler);
 
-        final CountDownLatch latch = new CountDownLatch(10);
+        final CountDownLatch latch = new CountDownLatch(notificationCount);
         final NotificationHandler notificationHandler = new NotificationHandler() {
             @Override
             public void handleNotification(Notification notification) {
@@ -42,16 +44,16 @@ public class BasicNotificationsUnitTestCase extends AbstractMgmtClientTestCase {
 
         final ManagementConnection connection = openConnection();
         try {
-            final ManagementConnection.NotificationRegistration registration = connection.registerNotificationHandler(ADDRESS, notificationHandler, NotificationFilter.ALL);
+            final Closeable registration = connection.registerNotificationHandler(ADDRESS, notificationHandler, NotificationFilter.ALL);
             try {
                 Assert.assertEquals(1, serverHandler.remoteListeners.size());
-                for (int i = 0; i < 10; i++) {
+                for (int i = 0; i < notificationCount; i++) {
                     final Notification notification = new Notification("test", new ModelNode(), "test message " + i);
                     serverHandler.sendNotification(notification);
                 }
                 latch.await();
             } finally {
-                registration.unregister();
+                StreamUtils.safeClose(registration);
             }
             Assert.assertEquals(0, serverHandler.remoteListeners.size());
         } finally {
