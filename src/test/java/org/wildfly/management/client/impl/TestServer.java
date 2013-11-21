@@ -55,67 +55,72 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
     protected synchronized void handleMessage(final Channel channel, final DataInput input, final ManagementProtocolHeader header) {
         final TestMessageHandler handler = this.handler;
         if (handler != null) {
-            this.handler = handler.handleMessage(input, new TestMessageHandlerContext() {
-                @Override
-                public void executeAsync(Runnable r) {
-                    executorService.execute(r);
-                }
-
-                @Override
-                public ManagementProtocolHeader getRequestHeader() {
-                    return header;
-                }
-
-                @Override
-                public Channel getChannel() {
-                    return channel;
-                }
-
-                @Override
-                public void sendResponse(TestMessageWriter writer) {
-                    sendResponse(writer, this);
-                }
-
-                @Override
-                public void sendResponse(TestMessageWriter writer, TestMessageHandlerContext context) {
-                    final ManagementResponseHeader response = ManagementResponseHeader.create((ManagementRequestHeader) context.getRequestHeader());
-                    try {
-                        final MessageOutputStream os = context.getChannel().writeMessage();
-                        try {
-                            final DataOutputStream dos = new DataOutputStream(os);
-                            response.write(dos);
-                            dos.write(ManagementProtocol.PARAM_RESPONSE);
-                            writer.writeMessage(dos);
-                            dos.write(ManagementProtocol.PARAM_END);
-                            dos.write(ManagementProtocol.REQUEST_END);
-                            dos.close();
-                        } finally {
-                            StreamUtils.safeClose(os);
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
+            try {
+                this.handler = handler.handleMessage(input, new TestMessageHandlerContext() {
+                    @Override
+                    public void executeAsync(Runnable r) {
+                        executorService.execute(r);
                     }
-                }
 
-                @Override
-                public void sendRequest(byte operationType, TestMessageWriter writer) {
-                    final ManagementRequestHeader requestHeader = new ManagementRequestHeader(VERSION, requestCounter.incrementAndGet(), ((ManagementRequestHeader) header).getBatchId(), operationType);
-                    try {
-                        final MessageOutputStream os = channel.writeMessage();
-                        try {
-                            final DataOutputStream dos = new DataOutputStream(os);
-                            requestHeader.write(dos);
-                            writer.writeMessage(dos);
-                            dos.write(ManagementProtocol.REQUEST_END);
-                            dos.close();
-                        } finally {
-                            StreamUtils.safeClose(os);
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                    @Override
+                    public ManagementProtocolHeader getRequestHeader() {
+                        return header;
                     }
-                }
-            });
+
+                    @Override
+                    public Channel getChannel() {
+                        return channel;
+                    }
+
+                    @Override
+                    public void sendResponse(TestMessageWriter writer) {
+                        sendResponse(writer, this);
+                    }
+
+                    @Override
+                    public void sendResponse(TestMessageWriter writer, TestMessageHandlerContext context) {
+                        final ManagementResponseHeader response = ManagementResponseHeader.create((ManagementRequestHeader) context.getRequestHeader());
+                        try {
+                            final MessageOutputStream os = context.getChannel().writeMessage();
+                            try {
+                                final DataOutputStream dos = new DataOutputStream(os);
+                                response.write(dos);
+                                dos.write(ManagementProtocol.PARAM_RESPONSE);
+                                writer.writeMessage(dos);
+                                dos.write(ManagementProtocol.PARAM_END);
+                                dos.write(ManagementProtocol.REQUEST_END);
+                                dos.close();
+                            } finally {
+                                StreamUtils.safeClose(os);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+
+                    @Override
+                    public void sendRequest(byte operationType, TestMessageWriter writer) {
+                        final ManagementRequestHeader requestHeader = new ManagementRequestHeader(VERSION, requestCounter.incrementAndGet(), ((ManagementRequestHeader) header).getBatchId(), operationType);
+                        try {
+                            final MessageOutputStream os = channel.writeMessage();
+                            try {
+                                final DataOutputStream dos = new DataOutputStream(os);
+                                requestHeader.write(dos);
+                                writer.writeMessage(dos);
+                                dos.write(ManagementProtocol.REQUEST_END);
+                                dos.close();
+                            } finally {
+                                StreamUtils.safeClose(os);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+            } catch (IOException e) {
+                e.printStackTrace();
+                ManagementClientChannelReceiver.safeWriteErrorResponse(channel, header, e);
+            }
         }
     }
 
@@ -131,7 +136,7 @@ class TestServer extends ManagementClientChannelReceiver implements OpenListener
 
     static interface TestMessageHandler {
 
-        TestMessageHandler handleMessage(DataInput dataInput, TestMessageHandlerContext context);
+        TestMessageHandler handleMessage(DataInput dataInput, TestMessageHandlerContext context) throws IOException;
 
     }
 
