@@ -10,7 +10,6 @@ import org.junit.Test;
 import org.wildfly.management.client.ManagementClient;
 import org.wildfly.management.client.ManagementClientFactory;
 import org.wildfly.management.client.ManagementConnection;
-import org.wildfly.management.client.impl.StreamUtils;
 import org.wildfly.management.client.helpers.ClientConstants;
 import org.wildfly.management.client.helpers.Operations;
 import org.xnio.OptionMap;

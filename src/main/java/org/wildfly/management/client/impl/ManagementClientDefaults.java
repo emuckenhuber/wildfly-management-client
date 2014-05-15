@@ -43,7 +43,7 @@ class ManagementClientDefaults {
     static final String DEFAULT_PROTOCOL = "http-remoting";
     static final int DEFAULT_TIMEOUT = 5000;
     static final int DEFAULT_MAX_THREADS = getSystemProperty("org.wildfly.management.client.client-threads", 2);
-    static final String CLIENT_BIND_ADDRESS = getSystemProperty("jboss.management.client_socket_bind_address");
+    static final String CLIENT_BIND_ADDRESS = getSystemProperty("org.wildfly.management.client_socket_bind_address");
 
     static final OptionMap DEFAULT_OPTIONS;
 

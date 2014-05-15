@@ -3,7 +3,6 @@ package org.wildfly.management.client.impl;
 import java.io.DataInput;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 import org.jboss.byteman.contrib.bmunit.BMRule;

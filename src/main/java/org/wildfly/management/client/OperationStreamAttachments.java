@@ -24,9 +24,13 @@ package org.wildfly.management.client;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.wildfly.management.client.impl.AbstractOperationAttachment;
+import org.xnio.IoUtils;
 
 /**
  * The operation stream attachments.
@@ -43,22 +47,34 @@ public interface OperationStreamAttachments {
     int getNumberOfAttachedStreams();
 
     /**
-     * Get the size of a given input stream.
+     * Get an operation stream attachment.
      *
-     * @param i the input stream index
-     * @return the stream size
+     * @param i the attachment index
+     * @return the stream attachment
      */
-    long getInputStreamSize(int i);
+    OperationStreamAttachment getAttachment(final int i);
 
     /**
-     * Get the input stream for a given input-stream index. The input stream is going to be closed
-     * automatically.
-     *
-     * @param i the input stream index
-     * @return the input stream
-     * @throws IOException
+     * A single stream attachment.
      */
-    InputStream getInputStream(int i) throws IOException;
+    interface OperationStreamAttachment {
+
+        /**
+         * Get the size of the stream.
+         *
+         * @return the size
+         */
+        long size();
+
+        /**
+         * Write the attachment to an output stream.
+         *
+         * @param os the output stream
+         * @throws java.io.IOException
+         */
+        void writeTo(OutputStream os) throws IOException;
+
+    }
 
     OperationStreamAttachments NO_ATTACHMENTS = new OperationStreamAttachments() {
 
@@ -68,56 +84,83 @@ public interface OperationStreamAttachments {
         }
 
         @Override
-        public InputStream getInputStream(final int i) throws IOException {
-            throw new IOException("no attachments available");
-        }
-
-        @Override
-        public long getInputStreamSize(int i) {
-            return -1;
+        public OperationStreamAttachment getAttachment(int i) {
+            throw new IndexOutOfBoundsException();
         }
     };
 
-    public class FileOperationAttachments implements OperationStreamAttachments {
+    public static class Builder {
 
-        final File[] files;
+        private List<OperationStreamAttachment> attachments = new ArrayList<>();
 
-        protected FileOperationAttachments(File[] files) {
-            this.files = files;
+        private Builder() {
+            //
         }
 
-        public static FileOperationAttachments create(final File... files) throws IOException {
-            for (final File file : files) {
-                if (!file.isFile() || !file.canRead()) {
-                    throw new FileNotFoundException(file.getAbsolutePath());
-                }
-                final long length = file.length();
-                final int value = (int) length;
-                if (length != value) {
-                    throw new IOException("Input stream size out of range: " + length);
-                }
+        public static Builder create(final OperationStreamAttachment... attachments) {
+            final Builder builder = new Builder();
+            builder.add(attachments);
+            return builder;
+        }
+
+        public static Builder create(final File... attachments) {
+            final Builder builder = new Builder();
+            builder.add(attachments);
+            return builder;
+        }
+
+        public Builder add(final OperationStreamAttachment... attachments) {
+            for (final OperationStreamAttachment attachment : attachments) {
+                this.attachments.add(attachment);
             }
-            return new FileOperationAttachments(files);
+            return this;
+        }
+
+        public Builder add(final File... attachments) {
+            for (final File attachment : attachments) {
+                this.attachments.add(new FileStreamAttachment(attachment));
+            }
+            return this;
+        }
+
+        public OperationStreamAttachments build() {
+            return new OperationStreamAttachments() {
+                @Override
+                public int getNumberOfAttachedStreams() {
+                    return attachments.size();
+                }
+
+                @Override
+                public OperationStreamAttachment getAttachment(int i) {
+                    return attachments.get(i);
+                }
+            };
+        }
+
+    }
+
+    class FileStreamAttachment extends AbstractOperationAttachment {
+
+        private final File file;
+        FileStreamAttachment(File file) {
+            this.file = file;
         }
 
         @Override
-        public int getNumberOfAttachedStreams() {
-            return files.length;
-        }
-
-        protected File getFile(int i) {
-            return files[i];
+        public long size() {
+            return file.length();
         }
 
         @Override
-        public long getInputStreamSize(int i) {
-            return getFile(i).length();
+        public void writeTo(OutputStream os) throws IOException {
+            final FileInputStream is = new FileInputStream(file);
+            try {
+                copyStream(is, os);
+            } finally {
+                IoUtils.safeClose(is);
+            }
         }
 
-        @Override
-        public InputStream getInputStream(int i) throws IOException {
-            return new FileInputStream(getFile(i));
-        }
     }
 
 }

@@ -128,7 +128,8 @@ class ManagementResponseHeader extends ManagementProtocolHeader {
 
     public static ManagementResponseHeader create(final ManagementRequestHeader header, Exception error) {
         final int workingVersion = Math.min(ManagementProtocol.VERSION, header.getVersion());
-        return new ManagementResponseHeader(workingVersion, header.getRequestId(), error != null ? error.getMessage() : null);
+        final String message = error.getMessage();
+        return new ManagementResponseHeader(workingVersion, header.getRequestId(), message != null ? message : "remote: " + error.getClass().getName());
     }
 
     public static ManagementResponseHeader create(final ManagementProtocolHeader header, int responseId) {

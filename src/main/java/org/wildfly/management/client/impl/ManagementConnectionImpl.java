@@ -36,7 +36,6 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -48,13 +47,13 @@ import org.jboss.dmr.ModelNode;
 import org.jboss.remoting3.Channel;
 import org.jboss.remoting3.CloseHandler;
 import org.jboss.remoting3.spi.AbstractHandleableCloseable;
-import org.wildfly.management.client._private.ManagementClientLogger;
-import org.wildfly.management.client._private.ManagementClientMessages;
 import org.wildfly.management.client.ManagementConnection;
 import org.wildfly.management.client.Notification;
 import org.wildfly.management.client.NotificationFilter;
 import org.wildfly.management.client.NotificationHandler;
 import org.wildfly.management.client.OperationStreamAttachments;
+import org.wildfly.management.client._private.ManagementClientLogger;
+import org.wildfly.management.client._private.ManagementClientMessages;
 import org.xnio.FutureResult;
 import org.xnio.IoUtils;
 
@@ -362,11 +361,11 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
 
         @Override
         public void writeRequest(DataOutput os) throws IOException {
-            final int inputStreamLength = attachments != null ? attachments.getNumberOfAttachedStreams() : 0;
+            final int attachmentsSize = attachments != null ? attachments.getNumberOfAttachedStreams() : 0;
             os.write(ManagementProtocol.PARAM_OPERATION);
             operation.writeExternal(os);
             os.write(ManagementProtocol.PARAM_INPUTSTREAMS_LENGTH);
-            os.writeInt(inputStreamLength);
+            os.writeInt(attachmentsSize);
             os.write(ManagementProtocol.REQUEST_END);
         }
 
@@ -453,7 +452,8 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
             StreamUtils.expectHeader(input, ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
             final int index = input.readInt();
             final OperationStreamAttachments attachments = request.getAttachments();
-            final long streamSize = attachments.getInputStreamSize(index);
+            final OperationStreamAttachments.OperationStreamAttachment attachment = attachments.getAttachment(index);
+            final long streamSize = attachment.size();
             final int streamLengthParam = (int) streamSize;
             if (streamSize != streamLengthParam) {
                 throw new IOException("Input stream size out of range: " + streamSize);
@@ -463,26 +463,20 @@ class ManagementConnectionImpl extends AbstractHandleableCloseable<ManagementCon
                 @Override
                 public void run() {
                     try {
-
-                        final InputStream is = attachments.getInputStream(index);
+                        final ManagementResponseHeader response = ManagementResponseHeader.create(header);
+                        final OutputStream os = channel.writeMessage();
                         try {
-                            final ManagementResponseHeader response = ManagementResponseHeader.create(header);
-                            final OutputStream os = channel.writeMessage();
-                            try {
-                                final DataOutput output = new DataOutputStream(os);
-                                // Write header
-                                response.write(output);
-                                output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_LENGTH);
-                                output.writeInt(streamLengthParam);
-                                output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_CONTENTS);
-                                StreamUtils.copyStream(is, output);
-                                output.writeByte(ManagementProtocol.RESPONSE_END);
-                                os.close();
-                            } finally {
-                                StreamUtils.safeClose(os);
-                            }
+                            final DataOutputStream output = new DataOutputStream(os);
+                            // Write header
+                            response.write(output);
+                            output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_LENGTH);
+                            output.writeInt(streamLengthParam);
+                            output.writeByte(ManagementProtocol.PARAM_INPUTSTREAM_CONTENTS);
+                            attachment.writeTo(new FixedLengthOutputStream(output, streamSize));
+                            output.writeByte(ManagementProtocol.RESPONSE_END);
+                            os.close();
                         } finally {
-                            StreamUtils.safeClose(is);
+                            StreamUtils.safeClose(os);
                         }
                     } catch (Exception e) {
                         safeWriteErrorResponse(channel, header, e);

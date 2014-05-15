@@ -23,7 +23,6 @@
 package org.wildfly.management.client.impl;
 
 import static org.wildfly.management.client._private.ManagementClientMessages.MESSAGES;
-import static org.wildfly.management.client.impl.StreamUtils.expectHeader;
 
 import java.io.DataInput;
 import java.io.DataOutput;

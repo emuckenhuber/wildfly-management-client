@@ -1,16 +1,15 @@
 package org.wildfly.management.client.impl;
 
-import static org.wildfly.management.client.impl.StreamUtils.expectHeader;
-import static org.wildfly.management.client.impl.StreamUtils.safeClose;
 import static org.wildfly.management.client.helpers.ClientConstants.OUTCOME;
 import static org.wildfly.management.client.helpers.ClientConstants.RESULT;
 import static org.wildfly.management.client.helpers.ClientConstants.SUCCESS;
+import static org.wildfly.management.client.impl.StreamUtils.expectHeader;
+import static org.wildfly.management.client.impl.StreamUtils.safeClose;
 
-import java.io.ByteArrayInputStream;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -204,7 +203,7 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
                     @Override
                     public void writeMessage(DataOutput os) throws IOException {
                         os.write(ManagementProtocol.PARAM_INPUTSTREAM_INDEX);
-                        os.writeInt(1);
+                        os.writeInt(0);
                     }
                 });
                 // Check the input stream and write the successful response
@@ -240,24 +239,9 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
         final ManagementConnection connection = openConnection();
         try {
-            connection.execute(BASIC_OPERATION, new OperationStreamAttachments() {
-                @Override
-                public int getNumberOfAttachedStreams() {
-                    return 1;
-                }
-
-                @Override
-                public long getInputStreamSize(int i) {
-                    return 1;
-                }
-
-                @Override
-                public InputStream getInputStream(int i) throws IOException {
-                    final byte[] data = new byte[1];
-                    data[0] = 0x01;
-                    return new ByteArrayInputStream(data);
-                }
-            });
+            final byte[] data = new byte[] { 0x01 };
+            final OperationStreamAttachments.OperationStreamAttachment attachment = new AbstractOperationAttachment.ByteArrayStreamAttachment(data);
+            connection.execute(BASIC_OPERATION, OperationStreamAttachments.Builder.create(attachment).build());
         } finally {
             safeClose(connection);
         }
@@ -302,23 +286,19 @@ public class BasicMgmtClientUnitTestCase extends AbstractMgmtClientTestCase {
 
         final ManagementConnection connection = openConnection();
         try {
-
-            connection.execute(BASIC_OPERATION, new OperationStreamAttachments() {
-                @Override
-                public int getNumberOfAttachedStreams() {
-                    return 1;
-                }
+            connection.execute(BASIC_OPERATION, OperationStreamAttachments.Builder.create(new OperationStreamAttachments.OperationStreamAttachment() {
 
                 @Override
-                public long getInputStreamSize(int i) {
+                public long size() {
                     return 4096L;
                 }
 
                 @Override
-                public InputStream getInputStream(int i) throws IOException {
+                public void writeTo(OutputStream os) throws IOException {
                     throw new IOException("cannot open stream");
                 }
-            });
+
+            }).build());
 
         } finally {
             safeClose(connection);
